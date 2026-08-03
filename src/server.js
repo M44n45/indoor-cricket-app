@@ -9,7 +9,6 @@ const playersRouter = require('./routes/players');
 const matchesRouter = require('./routes/matches');
 const scoringRouter = require('./routes/scoring');
 const statsRouter = require('./routes/stats');
-const leaderboardUploadRouter = require('./routes/leaderboardUpload');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -17,8 +16,13 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static('public', {
+  etag: false,
+  lastModified: false,
   setHeaders: (res) => {
-    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    res.set('Surrogate-Control', 'no-store');
   }
 }));
 
@@ -26,7 +30,6 @@ app.use('/api/players', playersRouter);
 app.use('/api/matches', matchesRouter);
 app.use('/api', scoringRouter);
 app.use('/api/stats', statsRouter);
-app.use('/api/leaderboard', leaderboardUploadRouter);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 

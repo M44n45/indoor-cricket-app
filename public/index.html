@@ -4,18 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Cricket Scorer</title>
-
-<!-- PWA -->
-<link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#15803d">
-
-<!-- iOS home-screen support (Safari ignores manifest.json for these) -->
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Cricket Scorer">
-<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-
-<link rel="icon" href="/icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
@@ -217,6 +205,8 @@ body{
 }
 .clickable-name{cursor:pointer; text-decoration:underline; text-decoration-color:transparent; transition:text-decoration-color .15s;}
 .clickable-name:active{text-decoration-color:var(--primary);}
+.clickable-row{cursor:pointer;}
+.clickable-row:active{background:rgba(34,197,94,0.08);}
 .player-pill select{
   border:none; background:white; border-radius:10px; padding:10px; font-size:16px; font-weight:600;
   box-shadow:0 1px 3px rgba(0,0,0,0.08); width:100%;
@@ -274,17 +264,61 @@ nav.tabbar button{
 nav.tabbar button .icon{font-size:20px;}
 nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
 .tabbar button.active .icon{filter:drop-shadow(0 1px 2px rgba(34,197,94,0.3));}
+
+.over-recap-container{padding:0;}
+.over-recap-row{background:#fafafa; border-radius:10px; padding:10px 12px; margin-bottom:10px; border:1px solid #eee;}
+.over-recap-header{font-size:12.5px; color:var(--sub); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;}
+.over-recap-total{font-weight:700; color:#111; font-size:12.5px;}
+.over-recap-balls{display:flex; gap:6px; flex-wrap:wrap;}
+.ball-pill{
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:30px; height:30px; padding:0 6px; border-radius:8px;
+  background:#fff; border:1px solid #ddd; font-weight:700; font-size:13px; color:#333;
+}
+.ball-pill.boundary{background:#7c3aed; border-color:#7c3aed; color:#fff;}
+.ball-pill.wicket{background:#dc2626; border-color:#dc2626; color:#fff;}
+
+#match-settings-body{overflow:hidden; transition:max-height 0.25s ease;}
+#match-settings-body.collapsed{max-height:0 !important; padding-top:0; margin-top:0;}
+
+.lb-card{border-radius:14px; overflow:hidden; padding-bottom:16px;}
+.lb-card-batting{background:linear-gradient(135deg, #fef9c3 0%, #ffffff 60%); border-left:4px solid #eab308;}
+.lb-card-bowling{background:linear-gradient(135deg, #dbeafe 0%, #ffffff 60%); border-left:4px solid #3b82f6;}
+.lb-card-live-batting{background:linear-gradient(135deg, #dcfce7 0%, #ffffff 60%); border-left:4px solid #16a34a;}
+.lb-card-live-bowling{background:linear-gradient(135deg, #fce7f3 0%, #ffffff 60%); border-left:4px solid #db2777;}
+.lb-section-title{margin:0 0 6px 0; font-size:16px; display:flex; align-items:center; gap:6px;}
+.lb-table-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch;}
+.lb-tabbar{display:flex; gap:8px; margin:10px 12px 6px;}
+.lb-tab-btn{
+  flex:1; padding:10px; border-radius:12px; border:1px solid var(--border); background:var(--card);
+  font-size:13.5px; font-weight:700; color:var(--sub); cursor:pointer;
+}
+.lb-tab-btn.active{background:var(--primary); color:white; border-color:var(--primary);}
+
+.lb-table{width:100%; border-collapse:collapse; font-size:12.5px; margin-top:8px;}
+.lb-table thead th{
+  background:rgba(0,0,0,0.06); text-align:left; padding:8px 6px; font-weight:700;
+  white-space:nowrap; position:sticky; top:0;
+}
+.lb-table tbody td{padding:7px 6px; border-bottom:1px solid rgba(0,0,0,0.06); white-space:nowrap;}
+.lb-table tbody tr:nth-child(odd){background:rgba(255,255,255,0.55);}
+.lb-table tbody tr:nth-child(even){background:rgba(0,0,0,0.02);}
+.lb-table tbody tr:hover{background:rgba(0,0,0,0.05);}
+.lb-card-batting .lb-table tbody tr:first-child td{font-weight:700; color:#92400e;}
+.lb-card-bowling .lb-table tbody tr:first-child td{font-weight:700; color:#1e40af;}
+.lb-card-live-batting .lb-table tbody tr:first-child td{font-weight:700; color:#15803d;}
+.lb-card-live-bowling .lb-table tbody tr:first-child td{font-weight:700; color:#be185d;}
 </style>
 </head>
 <body>
 
-<div class="topbar"><div style="display:flex; align-items:baseline; gap:6px;"><h1 id="topbar-title">Cricket Scorer</h1><span id="topbar-version" style="font-size:10px; opacity:0.55; font-weight:400;"></span></div><div style="display:flex; gap:6px;"><button id="back-to-mode-btn" class="btn-small" onclick="backToModeSelect()">← Modes</button><button id="share-watch-btn" class="btn-small" style="display:none;" onclick="shareWatchLink()">🔗 Share</button></div></div>
+<div class="topbar"><h1 id="topbar-title">Cricket Scorer <span style="font-size:10px; opacity:0.55; font-weight:400; vertical-align:middle;">v0.33</span></h1><div style="display:flex; gap:6px;"><button id="back-to-mode-btn" class="btn-small" onclick="backToModeSelect()">← Modes</button><button id="share-watch-btn" class="btn-small" style="display:none;" onclick="shareWatchLink()">🔗 Share</button></div></div>
 
 <div id="mode-select-view">
   <div class="landing-hero">
     <div class="landing-hero-icon">🏏</div>
     <h1 class="landing-title">Indoor Cricket</h1>
-    <div class="landing-version-badge" id="landing-version"></div>
+    <div class="landing-version-badge">v0.33</div>
     <p class="landing-subtitle">Score live matches, track stats, and follow along ball by ball.</p>
   </div>
 
@@ -306,21 +340,68 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
       </span>
       <span class="landing-card-arrow">›</span>
     </button>
+
+    <button class="landing-card" onclick="enterLeaderboardMode()">
+      <span class="landing-card-icon">🏆</span>
+      <span class="landing-card-text">
+        <span class="landing-card-title">Leaderboard &amp; Stats</span>
+        <span class="landing-card-desc">View player rankings and match stats</span>
+      </span>
+      <span class="landing-card-arrow">›</span>
+    </button>
   </div>
 
   <div class="landing-footer-note">🏆 Track leaderboards, full scorecards, and per-over stats once a match starts.</div>
 </div>
 
 <div id="watch-view" style="display:none;">
-  <div id="watch-picker-container"></div>
-  <div id="watch-scorecard-container"></div>
+  <div class="scoreboard">
+    <div class="teams"><span id="watch-batting-team">Team A</span><span id="watch-players-count"></span><span id="watch-overs-limit"></span></div>
+    <div class="runs" id="watch-score">0/0</div>
+    <div class="meta"><span id="watch-overs">0.0 ov</span><span class="crr" id="watch-crr">CRR 0.00</span></div>
+    <div class="target-row" id="watch-target-row" style="display:none; font-size:13px; margin-top:4px; opacity:0.9;">
+      Need <span id="watch-need-runs">0</span> off <span id="watch-need-balls">0</span> balls &middot; RRR <span id="watch-rrr">0.00</span>
+    </div>
+    <div class="striker-score-row" id="watch-striker-row" style="margin-top:10px; background:rgba(255,255,255,0.15); border-radius:10px; padding:8px 12px;">
+      <span id="watch-striker-name" style="font-weight:600; font-size:15px;">-</span>
+      <span id="watch-striker-stats" style="float:right; font-size:15px;">0 (0) SR 0.0</span>
+    </div>
+    <div class="bowler-score-row" id="watch-bowler-row" style="margin-top:6px; background:rgba(255,255,255,0.1); border-radius:10px; padding:6px 12px; font-size:13px;">
+      <span id="watch-bowler-name">-</span>
+      <span id="watch-bowler-stats" style="float:right;">0-0 (0.0)</span>
+    </div>
+    <div class="first-innings-row" id="watch-first-innings-row" style="display:none; margin-top:6px; font-size:12.5px; opacity:0.85;">
+      <span id="watch-first-innings-label">Team A</span>: <span id="watch-first-innings-score">0/0</span>
+    </div>
+  </div>
+  <div class="card">
+    <h2>This Over</h2>
+    <div class="balls-row" id="watch-this-over-balls"></div>
+  </div>
+  <div class="card">
+    <h2>Batting</h2>
+    <table id="watch-batting-table"><thead><tr><th>Batsman</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card">
+    <h2>Bowling</h2>
+    <table id="watch-bowling-table"><thead><tr><th>Bowler</th><th>O</th><th>R</th><th>W</th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card">
+    <h2>Fall of Wickets</h2>
+    <div id="watch-fow" style="font-size:12px; color:var(--sub); line-height:1.6;"></div>
+  </div>
 </div>
 
 <div id="setup-view" style="display:none;">
-  <div class="card">
-    <h2>Match Settings</h2>
-    <span class="sub-label">Match Name (optional)</span>
-    <input id="match-name" class="field" placeholder="e.g. Friday Night Bash" maxlength="80">
+  <div class="card" id="match-settings-card">
+    <h2 id="match-settings-header" onclick="toggleMatchSettings()" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
+      <span>Match Settings</span>
+      <span id="match-settings-chevron" style="font-size:13px; color:var(--sub);">▲</span>
+    </h2>
+    <div id="match-settings-body">
+    <span class="sub-label">Match Name</span>
+    <input id="match-name" class="field" placeholder="e.g. Sunday Night League - Week 5">
+    <p class="helper-text" style="margin-top:-6px; margin-bottom:10px;">Used to identify this game on the Watch Live screen. Leave blank to auto-generate from team names.</p>
     <span class="sub-label">Team A Name</span>
     <input id="team-a-name" class="field" placeholder="Team A name" value="Team A">
     <span class="sub-label">Team B Name</span>
@@ -336,6 +417,7 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
       </div>
     </div>
     <p class="helper-text" style="margin-top:8px; line-height:1.5;">Total Overs sets the innings length. Retires After sets when a batsman must step aside (they can return later). Use decimals for part-overs, e.g. 3.5 = 3 overs 3 balls.</p>
+    </div>
   </div>
 
   <div id="add-player-section">
@@ -346,7 +428,7 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
       <button class="btn btn-secondary" style="width:auto; padding:12px 16px;" onclick="addPlayer()">Add</button>
     </div>
     <label style="font-size:13px; color:var(--sub); display:flex; align-items:center; gap:6px; margin-top:6px;">
-      <input type="checkbox" id="is-common" style="width:auto; transform:scale(1.2);"> Common player (both sides)
+      <input type="checkbox" id="is-common" style="width:auto; transform:scale(1.2);"> Common player (available for both sides, one per match)
     </label>
   </div>
   </div>
@@ -366,12 +448,12 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
 
   <div class="card compact-card">
     <h2>Assign Teams</h2>
-    <p class="helper-text">Tap a player to cycle: unassigned → Team A (red) → Team B (blue) → Common (green) → unassigned.</p>
+    <p class="helper-text">Tap a player to cycle: unassigned → Team A (red) → Team B (blue) → Common Player (green) → unassigned. Only one Common Player per match.</p>
     <div id="assign-chip-box" class="chip-box"></div>
     <div class="team-count-row">
       <span class="team-count-chip a" id="team-a-count-chip">Team A: 0</span>
       <span class="team-count-chip b" id="team-b-count-chip">Team B: 0</span>
-      <span class="team-count-chip common" id="common-count-chip">Common: 0</span>
+      <span class="team-count-chip common" id="common-count-chip">Common Player: 0</span>
     </div>
   </div>
 
@@ -470,45 +552,31 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
 </div>
 
 <div id="leaderboard-view" style="display:none;">
-  <div class="card">
-    <h2>Overall Leaderboard (from uploads)</h2>
-    <p class="helper-text">Aggregated from all uploaded weekly PDFs — mirrors your old app's leaderboard format.</p>
-    <table id="lb-batting-table">
+  <div class="lb-tabbar">
+    <button id="lb-tab-batting-btn" class="lb-tab-btn active" onclick="switchLeaderboardTab('batting')">🏏 Batting</button>
+    <button id="lb-tab-bowling-btn" class="lb-tab-btn" onclick="switchLeaderboardTab('bowling')">🎯 Bowling</button>
+  </div>
+
+  <div class="card lb-card lb-card-live-batting" id="lb-tab-batting">
+    <h2 class="lb-section-title">🔥 Batting Leaderboard</h2>
+    <p class="helper-text">Stats from matches scored in this app.</p>
+    <div class="lb-table-scroll">
+    <table id="lb-live-batting-table" class="lb-table">
       <thead><tr><th>Player</th><th>M</th><th>Inn</th><th>R</th><th>4s</th><th>6s</th><th>Avg</th><th>SR</th><th>W-L</th><th>Win%</th></tr></thead>
       <tbody></tbody>
     </table>
-    <h2 style="margin-top:14px;">Bowling</h2>
-    <table id="lb-bowling-table">
+    </div>
+  </div>
+
+  <div class="card lb-card lb-card-live-bowling" id="lb-tab-bowling" style="display:none;">
+    <h2 class="lb-section-title">⚡ Bowling Leaderboard</h2>
+    <p class="helper-text">Stats from matches scored in this app.</p>
+    <div class="lb-table-scroll">
+    <table id="lb-live-bowling-table" class="lb-table">
       <thead><tr><th>Player</th><th>M</th><th>Ov</th><th>W</th><th>RC</th><th>Econ</th></tr></thead>
       <tbody></tbody>
     </table>
-    <button class="btn-small" onclick="toggleAdminPanel()">⚙ Manage uploads</button>
-  </div>
-
-  <div class="card" id="admin-panel" style="display:none;">
-    <h2>Admin: Upload &amp; Manage</h2>
-    <span class="sub-label">Admin Password</span>
-    <input type="password" id="admin-password" class="field" placeholder="Enter admin password">
-
-    <span class="sub-label">Upload Weekly Stats PDF</span>
-    <p class="helper-text">Parses a leaderboard PDF exported from your old scoring app and merges it into the Overall Leaderboard (does not affect Live-tracked matches).</p>
-    <input type="file" id="pdf-upload-input" accept="application/pdf" class="field">
-    <input type="text" id="upload-label" class="field" placeholder="Label this upload (e.g. Week 12)">
-    <button class="btn-small btn-small-primary" onclick="uploadLeaderboardPdf()">Upload &amp; Parse PDF</button>
-    <div id="upload-status" style="font-size:12px; margin-top:6px; color:var(--sub);"></div>
-
-    <span class="sub-label" style="margin-top:14px; display:block;">Uploaded Batches</span>
-    <table id="uploads-table"><thead><tr><th>Label</th><th>Players</th><th>Uploaded</th><th></th></tr></thead><tbody></tbody></table>
-    <button class="btn-small btn-small-danger" onclick="deleteAllUploads()">Delete All Overall Leaderboard Data</button>
-  </div>
-
-  <div class="card">
-    <h2>Live-Tracked Leaderboard</h2>
-    <p class="helper-text">Stats from matches actually scored in this app.</p>
-    <table id="lb-live-batting-table">
-      <thead><tr><th>Player</th><th>M</th><th>Inn</th><th>R</th><th>4s</th><th>6s</th><th>Avg</th><th>SR</th><th>W-L</th><th>Win%</th></tr></thead>
-      <tbody></tbody>
-    </table>
+    </div>
   </div>
 </div>
 
@@ -522,12 +590,8 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
 
 <div id="stats-view" style="display:none;">
   <div class="card">
-    <h2>Per-Over Progress</h2>
-    <select id="progress-match-select" class="field" onchange="loadOverProgress()"></select>
-    <div style="width:100%; height:260px;"><canvas id="over-progress-chart"></canvas></div>
-  </div>
-  <div class="card">
     <h2>Match History</h2>
+    <p class="helper-text">Tap a match to view its full scorecard.</p>
     <table id="history-table"><thead><tr><th>Date</th><th>Match</th><th>Result</th></tr></thead><tbody></tbody></table>
   </div>
   <div class="card">
@@ -552,15 +616,6 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
   <button onclick="showView('stats')" id="nav-stats"><span class="icon">📈</span>Stats</button>
 </nav>
 
-<script src="app.js?v=32"></script>
-<script>
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((err) => {
-      console.warn('Service worker registration failed:', err);
-    });
-  });
-}
-</script>
+<script src="app.js?v=31"></script>
 </body>
 </html>

@@ -7,16 +7,12 @@ const pool = require('../db/pool');
 router.post('/', async (req, res) => {
   const {
     match_date, overs_limit = 8, retirement_overs = 2,
-    team_a_name, team_b_name, team_a_player_ids, team_b_player_ids,
-    match_name
+    team_a_name, team_b_name, match_name, team_a_player_ids, team_b_player_ids
   } = req.body;
 
   if (!team_a_player_ids || !team_b_player_ids) {
     return res.status(400).json({ error: 'team_a_player_ids and team_b_player_ids are required' });
   }
-
-  // Trim to a plain string (or null) so empty input never gets stored as "" vs NULL inconsistently.
-  const trimmedMatchName = (typeof match_name === 'string' && match_name.trim()) ? match_name.trim() : null;
 
   const client = await pool.connect();
   try {
@@ -24,7 +20,7 @@ router.post('/', async (req, res) => {
     const matchResult = await client.query(
       `INSERT INTO matches (match_date, overs_limit, retirement_overs, team_a_name, team_b_name, match_name, status)
        VALUES ($1, $2, $3, $4, $5, $6, 'setup') RETURNING *`,
-      [match_date || new Date(), overs_limit, retirement_overs, team_a_name, team_b_name, trimmedMatchName]
+      [match_date || new Date(), overs_limit, retirement_overs, team_a_name, team_b_name, match_name || `${team_a_name} vs ${team_b_name}`]
     );
     const match = matchResult.rows[0];
 
@@ -134,7 +130,7 @@ router.get('/:matchId/current-innings', async (req, res) => {
 });
 
 router.get('/', async (req, res) => {
-  const result = await pool.query('SELECT * FROM matches ORDER BY match_date DESC');
+  const result = await pool.query('SELECT * FROM matches ORDER BY created_at DESC');
   res.json(result.rows);
 });
 

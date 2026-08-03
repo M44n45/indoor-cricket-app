@@ -13,15 +13,13 @@ CREATE TABLE IF NOT EXISTS matches (
   retirement_overs NUMERIC(5,2) NOT NULL DEFAULT 2,
   team_a_name TEXT NOT NULL,
   team_b_name TEXT NOT NULL,
+  match_name TEXT,
   status TEXT DEFAULT 'setup', -- setup, in_progress, completed
   winner_team TEXT, -- 'A' or 'B' or 'tie'
   result_summary TEXT,
   current_innings INT DEFAULT 1,
   created_at TIMESTAMP DEFAULT NOW()
 );
-
--- Optional user-provided label so matches can be identified later beyond just team names.
-ALTER TABLE matches ADD COLUMN IF NOT EXISTS match_name TEXT;
 
 CREATE TABLE IF NOT EXISTS match_players (
   id SERIAL PRIMARY KEY,

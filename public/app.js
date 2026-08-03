@@ -88,15 +88,6 @@ function enterScorerMode() {
   loadPlayers();
 }
 
-function enterLeaderboardMode() {
-  state.appMode = 'scorer';
-  document.getElementById('mode-select-view').style.display = 'none';
-  document.getElementById('watch-view').style.display = 'none';
-  document.getElementById('main-tabbar').style.display = 'flex';
-  document.getElementById('share-watch-btn').style.display = 'none';
-  showView('leaderboard');
-}
-
 function enterWatchMode() {
   state.appMode = 'watcher';
   document.getElementById('mode-select-view').style.display = 'none';
@@ -107,6 +98,9 @@ function enterWatchMode() {
   document.getElementById('leaderboard-view').style.display = 'none';
   document.getElementById('stats-view').style.display = 'none';
   document.getElementById('watch-view').style.display = 'block';
+  document.getElementById('watch-scorecard-container').style.display = 'none';
+  document.getElementById('watch-scorecard-container').innerHTML = '';
+  document.getElementById('watch-picker-container').innerHTML = '';
   document.getElementById('topbar-title').innerText = 'Live Match';
   promptWatchMatchSelection();
 }
@@ -125,26 +119,122 @@ function backToModeSelect() {
   document.getElementById('mode-select-view').style.display = 'block';
 }
 
-async function promptWatchMatchSelection() {
+// Static scorecard markup that used to live directly in index.html — now injected
+// dynamically once a specific match is chosen, so the picker can occupy the same
+// watch-view real estate beforehand.
+function renderWatchScorecardShell() {
+  return `
+  <div style="display:flex; justify-content:flex-end; margin:2px 12px 6px;">
+    <button class="btn-small" onclick="promptWatchMatchSelection(true)">🔁 Switch match</button>
+  </div>
+  <div class="scoreboard">
+    <div class="teams"><span id="watch-batting-team">Team A</span><span id="watch-players-count"></span><span id="watch-overs-limit"></span></div>
+    <div class="runs" id="watch-score">0/0</div>
+    <div class="meta"><span id="watch-overs">0.0 ov</span><span class="crr" id="watch-crr">CRR 0.00</span></div>
+    <div class="target-row" id="watch-target-row" style="display:none; font-size:13px; margin-top:4px; opacity:0.9;">
+      Need <span id="watch-need-runs">0</span> off <span id="watch-need-balls">0</span> balls &middot; RRR <span id="watch-rrr">0.00</span>
+    </div>
+    <div class="striker-score-row" id="watch-striker-row" style="margin-top:10px; background:rgba(255,255,255,0.15); border-radius:10px; padding:8px 12px;">
+      <span id="watch-striker-name" style="font-weight:600; font-size:15px;">-</span>
+      <span id="watch-striker-stats" style="float:right; font-size:15px;">0 (0) SR 0.0</span>
+    </div>
+    <div class="bowler-score-row" id="watch-bowler-row" style="margin-top:6px; background:rgba(255,255,255,0.1); border-radius:10px; padding:6px 12px; font-size:13px;">
+      <span id="watch-bowler-name">-</span>
+      <span id="watch-bowler-stats" style="float:right;">0-0 (0.0)</span>
+    </div>
+    <div class="first-innings-row" id="watch-first-innings-row" style="display:none; margin-top:6px; font-size:12.5px; opacity:0.85;">
+      <span id="watch-first-innings-label">Team A</span>: <span id="watch-first-innings-score">0/0</span>
+    </div>
+  </div>
+  <div class="card">
+    <h2>This Over</h2>
+    <div class="balls-row" id="watch-this-over-balls"></div>
+  </div>
+  <div class="card">
+    <h2>Batting</h2>
+    <table id="watch-batting-table"><thead><tr><th>Batsman</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card">
+    <h2>Bowling</h2>
+    <table id="watch-bowling-table"><thead><tr><th>Bowler</th><th>O</th><th>R</th><th>W</th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card">
+    <h2>Fall of Wickets</h2>
+    <div id="watch-fow" style="font-size:12px; color:var(--sub); line-height:1.6;"></div>
+  </div>`;
+}
+
+// Renders the list of in-progress matches for the viewer to explicitly pick from,
+// newest first, each labeled with its match name (if any) plus team names and
+// creation date/time so matches stay distinguishable even without a custom name.
+function renderWatchPicker(inProgressMatches) {
+  const pickerContainer = document.getElementById('watch-picker-container');
+  const scorecardContainer = document.getElementById('watch-scorecard-container');
+  scorecardContainer.style.display = 'none';
+  scorecardContainer.innerHTML = '';
+
+  if (inProgressMatches.length === 0) {
+    pickerContainer.innerHTML = `<div class="card" style="margin-top:60px; text-align:center;"><p class="helper-text" style="text-align:center;">No match is currently in progress. Ask the scorer to start one, or check back soon.</p></div>`;
+    return;
+  }
+
+  pickerContainer.innerHTML = `
+    <div class="card" style="margin-top:16px;">
+      <h2>Choose a Match to Watch</h2>
+      <p class="helper-text">${inProgressMatches.length} match${inProgressMatches.length > 1 ? 'es' : ''} in progress &middot; newest first.</p>
+    </div>
+    ${inProgressMatches.map(m => `
+      <button class="landing-card" style="width:100%; text-align:left;" onclick="selectWatchMatch(${m.id})">
+        <span class="landing-card-icon">🔴</span>
+        <span class="landing-card-text">
+          <span class="landing-card-title">${matchLabel(m)}</span>
+          <span class="landing-card-desc">${escapeHtml(m.team_a_name)} vs ${escapeHtml(m.team_b_name)} &middot; ${formatMatchDateTime(m)}</span>
+        </span>
+        <span class="landing-card-arrow">›</span>
+      </button>
+    `).join('')}
+  `;
+}
+
+// Called when a viewer taps a specific match in the picker.
+async function selectWatchMatch(matchId) {
+  document.getElementById('watch-picker-container').innerHTML = '';
+  const scorecardContainer = document.getElementById('watch-scorecard-container');
+  scorecardContainer.innerHTML = renderWatchScorecardShell();
+  scorecardContainer.style.display = 'block';
+  state.watchMatchId = matchId;
+  state.watchInningsId = null;
+  await resolveWatchInnings();
+  startWatchPolling();
+}
+
+// Entry point for watch mode. A direct share link (?match=123) still jumps straight
+// to that match's scorecard. Otherwise — including when the viewer taps "Switch
+// match" (forcePicker=true) — this shows the explicit picker rather than
+// auto-selecting a match for them.
+async function promptWatchMatchSelection(forcePicker = false) {
   const urlParams = new URLSearchParams(window.location.search);
-  const matchIdFromUrl = urlParams.get('match');
+  const matchIdFromUrl = !forcePicker ? urlParams.get('match') : null;
+  if (state.watchPollInterval) { clearInterval(state.watchPollInterval); state.watchPollInterval = null; }
+
   if (matchIdFromUrl) {
+    document.getElementById('watch-picker-container').innerHTML = '';
+    const scorecardContainer = document.getElementById('watch-scorecard-container');
+    scorecardContainer.innerHTML = renderWatchScorecardShell();
+    scorecardContainer.style.display = 'block';
     state.watchInningsId = null;
     state.watchMatchId = parseInt(matchIdFromUrl);
     await resolveWatchInnings();
     startWatchPolling();
     return;
   }
+
   const res = await fetch(`${API}/matches`);
   const matches = await res.json();
-  const inProgress = matches.filter(m => m.status === 'in_progress');
-  if (inProgress.length === 0) {
-    document.getElementById('watch-view').innerHTML = `<div class="card" style="margin-top:60px; text-align:center;"><p class="helper-text" style="text-align:center;">No match is currently in progress. Ask the scorer to start one, or check back soon.</p></div>`;
-    return;
-  }
-  state.watchMatchId = inProgress[0].id;
-  await resolveWatchInnings();
-  startWatchPolling();
+  const inProgress = matches
+    .filter(m => m.status === 'in_progress')
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  renderWatchPicker(inProgress);
 }
 
 async function resolveWatchInnings() {
@@ -270,11 +360,49 @@ function formatDateOnly(dateStr) {
 }
 // public/app.js
 const API = '/api';
+// Single source of truth for the visible build/version number. Bump this whenever
+// app.js changes, and keep the ?v= cache-busting query string on the <script> tag
+// in index.html in sync so browsers/service workers pick up the new file.
+const APP_VERSION = 'v32';
 let state = {
   players: [], matchId: null, inningsId: null,
   swipeQueue: [], swipeIndex: 0, teamAIds: [], teamBIds: [],
   pendingExtraType: null
 };
+
+(function renderVersionBadges() {
+  const topbarBadge = document.getElementById('topbar-version');
+  const landingBadge = document.getElementById('landing-version');
+  if (topbarBadge) topbarBadge.innerText = APP_VERSION;
+  if (landingBadge) landingBadge.innerText = APP_VERSION;
+})();
+
+// Basic HTML-escaping for any user-supplied text (match names, player names, etc.)
+// that gets interpolated into innerHTML strings, so it renders as text rather than markup.
+function escapeHtml(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Human-readable date + time for a match, e.g. "Aug 3, 2:15 PM" — used anywhere
+// matches are listed so games are distinguishable even without a custom name.
+function formatMatchDateTime(m) {
+  const d = new Date(m.created_at || m.match_date);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ', ' +
+    d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+// Consistent label for a match across dropdowns/pickers/history: prefer the custom
+// match name if set, otherwise fall back to "Team A vs Team B". Always HTML-escaped.
+function matchLabel(m) {
+  const base = m.match_name ? escapeHtml(m.match_name) : `${escapeHtml(m.team_a_name)} vs ${escapeHtml(m.team_b_name)}`;
+  return base;
+}
 
 function showView(view) {
   document.getElementById('setup-view').style.display = view === 'setup' ? 'block' : 'none';
@@ -300,7 +428,7 @@ async function loadMatchListForScorecard() {
   const res = await fetch(`${API}/matches`);
   const matches = await res.json();
   const sel = document.getElementById('scorecard-match-select');
-  sel.innerHTML = matches.map(m => `<option value="${m.id}">${m.team_a_name} vs ${m.team_b_name} - ${new Date(m.created_at).toLocaleDateString()}</option>`).join('');
+  sel.innerHTML = matches.map(m => `<option value="${m.id}">${matchLabel(m)} - ${formatMatchDateTime(m)}</option>`).join('');
   if (matches.length > 0) { sel.value = matches[0].id; loadFullScorecard(); }
 }
 
@@ -320,30 +448,12 @@ async function loadFullScorecard() {
       const econ = b.overs_bowled > 0 ? (b.runs_conceded / b.overs_bowled).toFixed(2) : '0.00';
       return `<tr><td>${b.name}</td><td>${b.overs_bowled}</td><td>${b.runs_conceded}</td><td>${b.wickets}</td><td>${econ}</td></tr>`;
     }).join('');
-    const oversRecapHtml = (inn.overs_recap || []).map(over => {
-      const pills = over.balls.map(b => {
-        const isBoundary = b.runs === 4 || b.runs === 6;
-        const cls = b.is_wicket ? 'ball-pill wicket' : (isBoundary ? 'ball-pill boundary' : 'ball-pill');
-        return `<span class="${cls}">${b.display}</span>`;
-      }).join('');
-      return `
-        <div class="over-recap-row">
-          <div class="over-recap-header">Over ${over.over_no + 1} — <b>${over.bowler_name}</b> to ${over.batsman_name}
-            <span class="over-recap-total">(${over.runs} Runs, ${over.wickets} Wkt)</span>
-          </div>
-          <div class="over-recap-balls">${pills}</div>
-        </div>`;
-    }).join('');
     return `
       <div class="card">
         <h2>${teamLabel} — Innings ${inn.innings.innings_no} (${inn.innings.total_runs}/${inn.innings.total_wickets}, ${parseFloat(inn.innings.overs_completed).toFixed(1)} ov)</h2>
         <table class="mini-table"><thead><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody>${battingRows}</tbody></table>
         <h3 style="margin-top:10px; font-size:13px; color:var(--sub);">Bowling</h3>
         <table class="mini-table"><thead><tr><th>Bowler</th><th>O</th><th>R</th><th>W</th><th>Econ</th></tr></thead><tbody>${bowlingRows}</tbody></table>
-      </div>
-      <div class="card">
-        <h3 style="margin-top:0; font-size:13px; color:var(--sub);">Ball-by-Ball Recap</h3>
-        <div class="over-recap-container">${oversRecapHtml}</div>
       </div>`;
   }).join('');
 }
@@ -352,7 +462,7 @@ async function loadMatchListForProgress() {
   const res = await fetch(`${API}/matches`);
   const matches = await res.json();
   const sel = document.getElementById('progress-match-select');
-  sel.innerHTML = matches.map(m => `<option value="${m.id}">${m.team_a_name} vs ${m.team_b_name} - ${new Date(m.created_at).toLocaleDateString()}</option>`).join('');
+  sel.innerHTML = matches.map(m => `<option value="${m.id}">${matchLabel(m)} - ${formatMatchDateTime(m)}</option>`).join('');
   if (matches.length > 0) { sel.value = matches[0].id; loadOverProgress(); }
 }
 
@@ -493,7 +603,7 @@ async function loadMatchHistory() {
     const result = r.status === 'completed'
       ? (r.winner_team === 'tie' ? 'Tie' : `${r.winner_team === 'A' ? r.team_a_name : r.team_b_name} won`)
       : 'In progress';
-    return `<tr><td>${formatDateOnly(r.match_date)}</td><td>${r.team_a_name} vs ${r.team_b_name}</td><td>${result}</td></tr>`;
+    return `<tr><td>${formatDateOnly(r.match_date)}</td><td>${matchLabel(r)}</td><td>${result}</td></tr>`;
   }).join('');
 }
 
@@ -624,6 +734,7 @@ function renderTeamsSummary(match) {
 
 async function createMatch() {
   const body = {
+    match_name: document.getElementById('match-name').value.trim(),
     team_a_name: document.getElementById('team-a-name').value || 'Team A',
     team_b_name: document.getElementById('team-b-name').value || 'Team B',
     overs_limit: parseFloat(document.getElementById('overs-limit').value),
@@ -640,7 +751,8 @@ async function createMatch() {
   });
   const match = await res.json();
   state.matchId = match.id;
-  document.getElementById('match-status').innerText = `Match created: ${match.team_a_name} vs ${match.team_b_name}`;
+  const matchLabel = match.match_name ? `${match.match_name} (${match.team_a_name} vs ${match.team_b_name})` : `${match.team_a_name} vs ${match.team_b_name}`;
+  document.getElementById('match-status').innerText = `Match created: ${matchLabel}`;
   document.getElementById('start-innings-card').style.display = 'block';
   document.getElementById('attendance-assign-section').style.display = 'none';
   document.getElementById('add-player-section').style.display = 'none';

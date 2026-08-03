@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS matches (
   created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Optional user-provided label so matches can be identified later beyond just team names.
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS match_name TEXT;
+
 CREATE TABLE IF NOT EXISTS match_players (
   id SERIAL PRIMARY KEY,
   match_id INT REFERENCES matches(id) ON DELETE CASCADE,

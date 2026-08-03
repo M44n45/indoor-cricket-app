@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Cricket Scorer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+:root{
+  --bg:#0f1a12; --bg-light:#f4f8f5; --card:#ffffff; --primary:#22c55e; --primary-dark:#15803d;
+  --accent:#facc15; --red:#ef4444; --orange:#f97316; --blue:#3b82f6; --text:#0f1a12; --sub:#6b7280;
+  --border:#e2e8e4; --radius:18px; --safe-top:env(safe-area-inset-top);
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+body{
+  margin:0; background:var(--bg-light); color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",Roboto,sans-serif;
+  padding-bottom:90px;
+}
+.topbar{
+  position:sticky; top:0; z-index:50; background:linear-gradient(135deg,#16281a,#1f3d26); backdrop-filter:blur(20px);
+  padding:calc(10px + var(--safe-top)) 16px 10px; border-bottom:1px solid rgba(255,255,255,0.08);
+  display:flex; align-items:center; justify-content:space-between;
+}
+.topbar h1{font-size:17px; font-weight:700; margin:0; color:white; letter-spacing:0.2px;}
+.scoreboard{
+  margin:10px 12px; background:linear-gradient(135deg,#16a34a,#0f5c2a); color:white;
+  border-radius:var(--radius); padding:18px; box-shadow:0 6px 18px rgba(22,163,74,0.25);
+  position:relative; overflow:hidden;
+}
+.scoreboard::after{
+  content:"🏏"; position:absolute; right:-6px; bottom:-14px; font-size:70px; opacity:0.08; transform:rotate(-12deg);
+}
+.scoreboard .teams{display:flex; justify-content:space-between; font-size:13px; color:#d9f2e2; margin-bottom:4px; font-weight:600;}
+.scoreboard .runs{font-size:40px; font-weight:800; letter-spacing:-0.5px;}
+.scoreboard .meta{display:flex; justify-content:space-between; margin-top:6px; font-size:13px; color:#c9ebd4;}
+.scoreboard .crr{color:var(--accent); font-weight:700;}
+.card{
+  background:var(--card); border-radius:var(--radius); margin:10px 12px; padding:14px;
+  box-shadow:0 1px 4px rgba(0,0,0,0.06);
+}
+.compact-card{margin:6px 12px !important; padding:10px !important;}
+.compact-card h2{margin:0 0 6px !important; font-size:12.5px !important;}
+.card h2{font-size:14px; font-weight:600; margin:0 0 10px; color:var(--sub); text-transform:uppercase; letter-spacing:0.4px;}
+.field{width:100%; padding:12px; border-radius:12px; border:1px solid var(--border); font-size:16px; background:#f9f9fb; margin-bottom:8px;}
+.btn{
+  border:none; border-radius:14px; padding:14px; font-size:16px; font-weight:700; cursor:pointer;
+  min-height:48px; touch-action:manipulation; transition:transform .08s;
+}
+.btn:active{transform:scale(0.95);}
+.btn-primary{background:linear-gradient(135deg,#22c55e,#15803d); color:white; width:100%; box-shadow:0 3px 10px rgba(34,197,94,0.35);}
+.btn-secondary{background:#eef2ee; color:var(--text); width:100%;}
+.btn-full{width:100%; margin-top:6px;}
+
+/* Swipe roster selector */
+.player-stack{position:relative; height:150px; margin:8px 0;}
+.player-card{
+  position:absolute; inset:0; background:white; border:2px solid var(--border); border-radius:14px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:20px; font-weight:600;
+  box-shadow:0 4px 12px rgba(0,0,0,0.1); touch-action:pan-y; user-select:none; transition:transform .25s, opacity .25s;
+}
+.player-card .hint{font-size:12px; color:var(--sub); font-weight:400; margin-top:6px;}
+.player-card.swiping-left{background:#ffe5e5;}
+.player-card.swiping-right{background:#e5f9e9;}
+.swipe-actions{display:flex; justify-content:space-between; margin-top:8px; font-size:12px; color:var(--sub); padding:0 4px;}
+.roster-progress{text-align:center; font-size:13px; color:var(--sub); margin-bottom:6px;}
+.team-chip-row{display:flex; gap:8px; margin-top:10px;}
+.team-chip{flex:1; padding:10px; border-radius:10px; font-size:13px; text-align:center;}
+.team-chip.a{background:#e8f0fe; color:#1a56db;}
+.team-chip.b{background:#fdecea; color:#c0392b;}
+.helper-text{font-size:11.5px; color:var(--sub); margin:0 0 6px; line-height:1.3;}
+.landing-hero{
+  text-align:center; padding:56px 20px 28px; background:linear-gradient(160deg,#16281a,#1f3d26 60%,#22c55e 140%);
+  border-radius:0 0 28px 28px; margin:-16px -16px 24px; color:white;
+}
+.landing-hero-icon{font-size:48px; line-height:1; margin-bottom:10px; filter:drop-shadow(0 4px 10px rgba(0,0,0,0.25));}
+.landing-title{font-size:26px; font-weight:800; margin:0 0 6px; letter-spacing:-0.3px;}
+.landing-subtitle{font-size:13.5px; color:rgba(255,255,255,0.85); margin:0; line-height:1.5; max-width:280px; margin-left:auto; margin-right:auto;}
+.landing-version-badge{display:inline-block; font-size:10.5px; opacity:0.6; background:rgba(255,255,255,0.15); border-radius:20px; padding:2px 10px; margin-bottom:10px;}
+.landing-actions{display:flex; flex-direction:column; gap:12px; padding:0 16px;}
+.landing-card{
+  display:flex; align-items:center; gap:14px; width:100%; text-align:left; background:var(--card);
+  border:1px solid var(--border); border-radius:16px; padding:16px; cursor:pointer;
+  box-shadow:0 2px 8px rgba(0,0,0,0.04); transition:transform .1s, box-shadow .1s;
+}
+.landing-card:active{transform:scale(0.98);}
+.landing-card-primary{background:linear-gradient(135deg,var(--primary),var(--primary-dark)); border:none; color:white;}
+.landing-card-icon{font-size:26px; flex-shrink:0;}
+.landing-card-text{display:flex; flex-direction:column; gap:2px; flex:1;}
+.landing-card-title{font-size:15.5px; font-weight:700;}
+.landing-card-desc{font-size:12px; opacity:0.75; line-height:1.3;}
+.landing-card-arrow{font-size:22px; opacity:0.4; flex-shrink:0;}
+.landing-card-primary .landing-card-arrow{opacity:0.8;}
+.landing-footer-note{
+  text-align:center; font-size:11.5px; color:var(--sub); margin:28px 16px 0; line-height:1.5; padding-bottom:20px;
+}
+
+.scoring-disabled{opacity:0.35; pointer-events:none;}
+
+.mini-table{width:100%; border-collapse:collapse; font-size:12.5px; margin-top:6px;}
+.mini-table th{background:var(--bg-light); text-align:left; padding:5px 6px; font-weight:600; color:var(--sub); border-bottom:1px solid var(--border);}
+.mini-table td{padding:5px 6px; border-bottom:1px solid #f2f2f4;}
+.mini-table tbody tr:last-child td{border-bottom:none;}
+
+.mini-table{width:100%; border-collapse:collapse; font-size:12.5px; margin-top:6px;}
+.mini-table th{background:var(--bg-light); text-align:left; padding:5px 6px; font-weight:600; color:var(--sub); border-bottom:1px solid var(--border);}
+.mini-table td{padding:5px 6px; border-bottom:1px solid #f2f2f4;}
+.mini-table tbody tr:last-child td{border-bottom:none;}
+
+.checkbox-list-tall{
+  max-height:280px; overflow-y:auto; border:1px solid var(--border); border-radius:10px; padding:6px;
+  display:grid; grid-template-columns:repeat(2, 1fr); gap:2px 8px;
+}
+@media (min-width:420px){ .checkbox-list-tall{ grid-template-columns:repeat(3, 1fr); } }
+.attend-row{display:flex; align-items:center; gap:6px; padding:6px 4px; border-bottom:1px solid #f2f2f4;}
+.attend-row input[type=checkbox]{width:18px; height:18px; accent-color:var(--primary); flex-shrink:0;}
+.attend-row label{font-size:13px; flex:1;}
+.assign-row{display:flex; align-items:center; gap:10px; padding:10px 8px; border-bottom:1px solid #f2f2f4;}
+.assign-row:last-child{border-bottom:none;}
+.assign-row .player-name{flex:1; font-size:15px;}
+.assign-btn{
+  border:none; border-radius:10px; padding:8px 14px; font-size:13px; font-weight:600; min-width:80px;
+  background:#f0f0f3; color:var(--sub);
+}
+.assign-btn.team-a-active{background:#e8f0fe; color:#1a56db;}
+.assign-btn.team-b-active{background:#fdecea; color:#c0392b;}
+.player-pill-row{display:flex; gap:10px; margin-bottom:10px;}
+.player-pill{
+  flex:1; border-radius:14px; padding:12px; display:flex; flex-direction:column; gap:6px;
+}
+.player-pill.striker-pill{background:linear-gradient(135deg,#eafaf0,#d7f5e3);}
+.player-pill.bowler-pill{background:linear-gradient(135deg,#fff4e5,#ffe9cc);}
+.pill-label{font-size:12px; font-weight:600; color:var(--text); opacity:0.75;}
+.unassigned-pool{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; min-height:44px; padding:8px; background:#f7f7fa; border-radius:12px;}
+.player-chip{
+  background:white; border:1px solid var(--border); border-radius:20px; padding:8px 12px; font-size:14px; font-weight:600;
+  display:flex; align-items:center; gap:6px; cursor:grab; box-shadow:0 1px 3px rgba(0,0,0,0.06); user-select:none;
+}
+.player-chip.selected{border:2px solid var(--primary); background:#eafaf0;}
+.player-chip .common-badge{font-size:14px; cursor:pointer; opacity:0.5;}
+.player-chip .common-badge.active{opacity:1;}
+.team-drop-row{display:flex; gap:10px;}
+.team-drop-zone{flex:1; min-height:120px; border:2px dashed var(--border); border-radius:14px; padding:8px; background:#fbfbfd;}
+.team-drop-zone.team-a-zone{border-color:#a9c6fb;}
+.team-drop-zone.team-b-zone{border-color:#f5b7ae;}
+.zone-title{font-size:12px; font-weight:700; color:var(--sub); text-transform:uppercase; margin-bottom:6px; text-align:center;}
+.zone-cards{display:flex; flex-wrap:wrap; gap:6px; min-height:60px;}
+.zone-cards .player-chip{background:white;}
+.assign-tap-row{display:flex; align-items:center; gap:6px; padding:5px 6px; border-bottom:1px solid #f2f2f4;}
+.assign-tap-row:last-child{border-bottom:none;}
+.assign-tap-row .player-name{flex:1; font-size:13px;}
+.assign-tap-btn{
+  border:none; border-radius:8px; padding:5px 10px; font-size:11px; font-weight:600; min-width:58px;
+  background:#f0f0f3; color:var(--sub);
+}
+.assign-tap-btn.team-a-active{background:#e8f0fe; color:#1a56db;}
+.assign-tap-btn.team-b-active{background:#fdecea; color:#c0392b;}
+.chip-box{display:flex; flex-wrap:wrap; gap:8px; padding:6px 2px;}
+.player-chip{
+  padding:8px 14px; border-radius:20px; font-size:13px; font-weight:700; cursor:pointer;
+  background:#eef1ee; color:#4b5350; border:2px solid transparent; transition:all .12s;
+}
+.player-chip.team-a{background:#fee2e2; color:#b91c1c; border-color:#ef4444;}
+.player-chip.team-b{background:#dbeafe; color:#1d4ed8; border-color:#3b82f6;}
+.player-chip.common{background:#dcfce7; color:#15803d; border-color:#22c55e;}
+.team-count-chip.common{background:#dcfce7; color:#15803d;}
+.team-count-row{display:flex; gap:8px; margin-top:8px;}
+.team-count-chip{
+  flex:1; text-align:center; padding:6px 8px; border-radius:8px; font-size:12px; font-weight:700;
+}
+.team-count-chip.a{background:#fee2e2; color:#b91c1c;}
+.team-count-chip.b{background:#dbeafe; color:#1d4ed8;}
+.btn-small{
+  display:inline-block; padding:6px 12px; font-size:12px; font-weight:600; border-radius:8px;
+  border:1px solid var(--border); background:#f0f0f3; color:var(--sub); margin-top:10px; cursor:pointer;
+}
+.btn-small-primary{background:var(--primary); color:white; border:none;}
+.btn-small-danger{background:var(--red); color:white; border:none; margin-top:10px;}
+#uploads-table td{font-size:12px; padding:6px 4px;}
+#uploads-table button{padding:4px 8px; font-size:11px; border-radius:6px; border:none; background:var(--red); color:white;}
+.player-card-overlay{
+  position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center;
+  z-index:200; padding:20px;
+}
+.player-card{
+  background:#f5efe3; border-radius:24px; padding:24px; width:100%; max-width:340px;
+  border:6px solid #d9cdb3; box-shadow:0 10px 30px rgba(0,0,0,0.3);
+}
+.player-card-header{display:flex; align-items:center; gap:14px; margin-bottom:18px;}
+.player-card-avatar{
+  width:52px; height:52px; border-radius:50%; background:#16281a; color:white; font-size:22px; font-weight:800;
+  display:flex; align-items:center; justify-content:center; flex-shrink:0;
+}
+.player-card-name{font-size:19px; font-weight:800; color:#1c1c1e; margin:0;}
+.player-card-role{font-size:11px; color:#8a8578; text-transform:uppercase; letter-spacing:0.6px; margin-top:2px;}
+.player-card-grid{display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;}
+.player-card-stat{
+  background:#efe6d3; border-radius:14px; padding:12px 6px; text-align:center;
+}
+.player-card-stat .value{font-size:20px; font-weight:800; color:#1c1c1e;}
+.player-card-stat .label{font-size:10px; color:#8a8578; text-transform:uppercase; letter-spacing:0.4px; margin-top:2px;}
+.player-card-close{
+  display:block; margin:16px auto 0; background:none; border:none; color:#8a8578; font-size:13px; font-weight:600; cursor:pointer;
+}
+.clickable-name{cursor:pointer; text-decoration:underline; text-decoration-color:transparent; transition:text-decoration-color .15s;}
+.clickable-name:active{text-decoration-color:var(--primary);}
+.player-pill select{
+  border:none; background:white; border-radius:10px; padding:10px; font-size:16px; font-weight:600;
+  box-shadow:0 1px 3px rgba(0,0,0,0.08); width:100%;
+}
+
+/* Ball tracker */
+.balls-row{display:flex; gap:6px; flex-wrap:wrap; margin:8px 0;}
+.ball-pill{
+  min-width:32px; height:32px; padding:0 4px; border-radius:16px; display:flex; align-items:center; justify-content:center;
+  font-size:12px; font-weight:700; color:white; background:#c7c7cc; flex-shrink:0;
+}
+.ball-pill.runs{background:var(--primary);}
+.ball-pill.four{background:var(--blue);}
+.ball-pill.six{background:#af52de;}
+.ball-pill.wicket{background:var(--red);}
+.ball-pill.extra{background:var(--orange);}
+.player-select-row{display:flex; gap:8px; margin-bottom:10px;}
+.player-select-row select{flex:1;}
+.player-select-row .sub-label{font-size:11px; color:var(--sub); margin-bottom:2px; display:block;}
+
+.runs-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:8px;}
+.runs-grid .btn{padding:16px 6px; font-size:18px;}
+.runs-grid .btn.four{background:var(--blue); color:white;}
+.runs-grid .btn.six{background:#af52de; color:white;}
+.action-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:8px;}
+.action-grid .btn{background:var(--orange); color:white; font-size:14px;}
+.wicket-btn{background:var(--red); color:white; width:100%; margin-top:8px; font-size:16px;}
+
+/* Modal for no-ball extra run selection */
+.modal-overlay{position:fixed; inset:0; background:rgba(0,0,0,0.4); display:flex; align-items:flex-end; z-index:100;}
+.modal-sheet{
+  background:white; width:100%; border-radius:20px 20px 0 0; padding:20px 16px calc(20px + var(--safe-top));
+  animation:slideUp .25s ease-out;
+}
+@keyframes slideUp{from{transform:translateY(100%);} to{transform:translateY(0);}}
+.modal-sheet h3{margin:0 0 12px; font-size:16px;}
+.pill-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:14px;}
+.pill-grid button{padding:12px; border-radius:10px; border:none; background:#f0f0f3; font-size:15px; font-weight:600;}
+.pill-grid button.selected{background:var(--primary); color:white;}
+
+table{width:100%; border-collapse:collapse; font-size:12.5px;}
+th,td{padding:6px 4px; text-align:left; border-bottom:1px solid var(--border);}
+th{color:var(--sub); font-weight:600; text-transform:uppercase; font-size:10.5px;}
+tr.striker{background:#eef9ef;}
+
+nav.tabbar{
+  position:fixed; bottom:0; left:0; right:0; background:rgba(255,255,255,0.97); backdrop-filter:blur(20px);
+  border-top:1px solid var(--border); display:flex; padding:8px 0 calc(8px + env(safe-area-inset-bottom));
+  z-index:50; box-shadow:0 -2px 12px rgba(0,0,0,0.04);
+}
+nav.tabbar button{
+  flex:1; background:none; border:none; font-size:11px; color:var(--sub); display:flex; flex-direction:column;
+  align-items:center; gap:2px; padding:4px;
+}
+nav.tabbar button .icon{font-size:20px;}
+nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
+.tabbar button.active .icon{filter:drop-shadow(0 1px 2px rgba(34,197,94,0.3));}
+</style>
+</head>
+<body>
+
+<div class="topbar"><h1 id="topbar-title">Cricket Scorer <span style="font-size:10px; opacity:0.55; font-weight:400; vertical-align:middle;">v31</span></h1><div style="display:flex; gap:6px;"><button id="back-to-mode-btn" class="btn-small" onclick="backToModeSelect()">← Modes</button><button id="share-watch-btn" class="btn-small" style="display:none;" onclick="shareWatchLink()">🔗 Share</button></div></div>
+
+<div id="mode-select-view">
+  <div class="landing-hero">
+    <div class="landing-hero-icon">🏏</div>
+    <h1 class="landing-title">Indoor Cricket</h1>
+    <div class="landing-version-badge">v31</div>
+    <p class="landing-subtitle">Score live matches, track stats, and follow along ball by ball.</p>
+  </div>
+
+  <div class="landing-actions">
+    <button class="landing-card landing-card-primary" onclick="enterScorerMode()">
+      <span class="landing-card-icon">🖊️</span>
+      <span class="landing-card-text">
+        <span class="landing-card-title">Score a Match</span>
+        <span class="landing-card-desc">Set up teams and start scoring live</span>
+      </span>
+      <span class="landing-card-arrow">›</span>
+    </button>
+
+    <button class="landing-card" onclick="enterWatchMode()">
+      <span class="landing-card-icon">📺</span>
+      <span class="landing-card-text">
+        <span class="landing-card-title">Watch Live</span>
+        <span class="landing-card-desc">Follow an in-progress match as a spectator</span>
+      </span>
+      <span class="landing-card-arrow">›</span>
+    </button>
+  </div>
+
+  <div class="landing-footer-note">🏆 Track leaderboards, full scorecards, and per-over stats once a match starts.</div>
+</div>
+
+<div id="watch-view" style="display:none;">
+  <div class="scoreboard">
+    <div class="teams"><span id="watch-batting-team">Team A</span><span id="watch-players-count"></span><span id="watch-overs-limit"></span></div>
+    <div class="runs" id="watch-score">0/0</div>
+    <div class="meta"><span id="watch-overs">0.0 ov</span><span class="crr" id="watch-crr">CRR 0.00</span></div>
+    <div class="target-row" id="watch-target-row" style="display:none; font-size:13px; margin-top:4px; opacity:0.9;">
+      Need <span id="watch-need-runs">0</span> off <span id="watch-need-balls">0</span> balls &middot; RRR <span id="watch-rrr">0.00</span>
+    </div>
+    <div class="striker-score-row" id="watch-striker-row" style="margin-top:10px; background:rgba(255,255,255,0.15); border-radius:10px; padding:8px 12px;">
+      <span id="watch-striker-name" style="font-weight:600; font-size:15px;">-</span>
+      <span id="watch-striker-stats" style="float:right; font-size:15px;">0 (0) SR 0.0</span>
+    </div>
+    <div class="bowler-score-row" id="watch-bowler-row" style="margin-top:6px; background:rgba(255,255,255,0.1); border-radius:10px; padding:6px 12px; font-size:13px;">
+      <span id="watch-bowler-name">-</span>
+      <span id="watch-bowler-stats" style="float:right;">0-0 (0.0)</span>
+    </div>
+    <div class="first-innings-row" id="watch-first-innings-row" style="display:none; margin-top:6px; font-size:12.5px; opacity:0.85;">
+      <span id="watch-first-innings-label">Team A</span>: <span id="watch-first-innings-score">0/0</span>
+    </div>
+  </div>
+  <div class="card">
+    <h2>This Over</h2>
+    <div class="balls-row" id="watch-this-over-balls"></div>
+  </div>
+  <div class="card">
+    <h2>Batting</h2>
+    <table id="watch-batting-table"><thead><tr><th>Batsman</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card">
+    <h2>Bowling</h2>
+    <table id="watch-bowling-table"><thead><tr><th>Bowler</th><th>O</th><th>R</th><th>W</th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card">
+    <h2>Fall of Wickets</h2>
+    <div id="watch-fow" style="font-size:12px; color:var(--sub); line-height:1.6;"></div>
+  </div>
+</div>
+
+<div id="setup-view" style="display:none;">
+  <div class="card">
+    <h2>Match Settings</h2>
+    <span class="sub-label">Team A Name</span>
+    <input id="team-a-name" class="field" placeholder="Team A name" value="Team A">
+    <span class="sub-label">Team B Name</span>
+    <input id="team-b-name" class="field" placeholder="Team B name" value="Team B">
+    <div style="display:flex; gap:8px;">
+      <div style="flex:1;">
+        <span class="sub-label">Total Overs (per innings)</span>
+        <input id="overs-limit" class="field" type="number" step="0.1" value="8" placeholder="e.g. 8 or 3.5">
+      </div>
+      <div style="flex:1;">
+        <span class="sub-label" style="line-height:1.3;">Retires After (overs)</span>
+        <input id="retirement-overs" class="field" type="number" step="0.1" value="2" placeholder="e.g. 2 or 0.5">
+      </div>
+    </div>
+    <p class="helper-text" style="margin-top:8px; line-height:1.5;">Total Overs sets the innings length. Retires After sets when a batsman must step aside (they can return later). Use decimals for part-overs, e.g. 3.5 = 3 overs 3 balls.</p>
+  </div>
+
+  <div id="add-player-section">
+  <div class="card">
+    <h2>Add New Player</h2>
+    <div style="display:flex; gap:8px;">
+      <input id="player-name" class="field" placeholder="Player name" style="margin-bottom:0;">
+      <button class="btn btn-secondary" style="width:auto; padding:12px 16px;" onclick="addPlayer()">Add</button>
+    </div>
+    <label style="font-size:13px; color:var(--sub); display:flex; align-items:center; gap:6px; margin-top:6px;">
+      <input type="checkbox" id="is-common" style="width:auto; transform:scale(1.2);"> Common player (both sides)
+    </label>
+  </div>
+  </div>
+
+  <div class="card" id="teams-summary-card" style="display:none;">
+    <h2>Teams</h2>
+    <div id="teams-summary-content"></div>
+  </div>
+
+  <div id="attendance-assign-section">
+  <div class="card compact-card">
+    <h2>Who's Playing Today?</h2>
+    <p class="helper-text">Tick everyone present. Not everyone needs to play every game.</p>
+    <div id="attendance-list" class="checkbox-list-tall"></div>
+    <div style="font-size:11px; color:var(--sub); margin-top:4px;" id="attendance-count">0 players selected</div>
+  </div>
+
+  <div class="card compact-card">
+    <h2>Assign Teams</h2>
+    <p class="helper-text">Tap a player to cycle: unassigned → Team A (red) → Team B (blue) → Common (green) → unassigned.</p>
+    <div id="assign-chip-box" class="chip-box"></div>
+    <div class="team-count-row">
+      <span class="team-count-chip a" id="team-a-count-chip">Team A: 0</span>
+      <span class="team-count-chip b" id="team-b-count-chip">Team B: 0</span>
+      <span class="team-count-chip common" id="common-count-chip">Common: 0</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <button class="btn btn-primary btn-full" onclick="createMatch()">Create Match</button>
+    <div id="match-status" style="font-size:13px; margin-top:8px; color:var(--sub);"></div>
+  </div>
+  </div>
+
+  <div class="card" id="edit-teams-toggle-card" style="display:none;">
+    <button class="btn btn-secondary btn-full" onclick="toggleAttendanceAssignSection()">
+      <span id="edit-teams-toggle-label">✏️ Edit Players / Teams</span>
+    </button>
+  </div>
+
+  <div class="card" id="start-innings-card" style="display:none;">
+    <h2>Start the Match</h2>
+    <p class="helper-text">Choose which team bats first. You'll pick the opening batsman and bowler from the Live Score screen once the innings begins.</p>
+    <span class="sub-label">Who Bats First?</span>
+    <select id="innings-batting-team" class="field"><option value="A">Team A bats first</option><option value="B">Team B bats first</option></select>
+    <button class="btn btn-primary btn-full" onclick="startInnings()">Start Innings</button>
+  </div>
+</div>
+
+<div id="score-view" style="display:none;">
+  <div class="scoreboard">
+    <div class="winner-banner" id="sb-winner-banner" style="display:none; background:rgba(250,204,21,0.2); border:1px solid rgba(250,204,21,0.5); border-radius:10px; padding:8px 12px; margin-bottom:10px; font-weight:700; font-size:14px; text-align:center;">
+      🏆 <span id="sb-winner-text"></span>
+    </div>
+    <div class="teams"><span id="sb-batting-team">Team A</span><span id="sb-players-count" style="font-size:12px; opacity:0.85;"></span><span id="sb-overs-limit">8 overs</span></div>
+    <div class="runs" id="sb-score">0/0</div>
+    <div class="meta"><span id="sb-overs">0.0 ov</span><span class="crr" id="sb-crr">CRR 0.00</span></div>
+    <div class="target-row" id="sb-target-row" style="display:none; font-size:13px; margin-top:4px; opacity:0.9;">
+      Need <span id="sb-need-runs">0</span> off <span id="sb-need-balls">0</span> balls &middot; RRR <span id="sb-rrr">0.00</span>
+    </div>
+    <div class="striker-score-row" id="sb-striker-row" style="margin-top:10px; background:rgba(255,255,255,0.15); border-radius:10px; padding:8px 12px;">
+      <span id="sb-striker-name" style="font-weight:600; font-size:15px;">-</span>
+      <span id="sb-striker-stats" style="float:right; font-size:15px;">0 (0) SR 0.0</span>
+    </div>
+    <div class="bowler-score-row" id="sb-bowler-row" style="margin-top:6px; background:rgba(255,255,255,0.1); border-radius:10px; padding:6px 12px; font-size:13px;">
+      <span id="sb-bowler-name">-</span>
+      <span id="sb-bowler-stats" style="float:right;">0-0 (0.0)</span>
+    </div>
+    <div class="first-innings-row" id="sb-first-innings-row" style="display:none; margin-top:6px; font-size:12.5px; opacity:0.85;">
+      <span id="sb-first-innings-label">Team A</span>: <span id="sb-first-innings-score">0/0</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="player-pill-row">
+      <div class="player-pill striker-pill">
+        <span class="pill-label">🏏 On Strike</span>
+        <select id="striker-select" onchange="changeBatsman()"></select>
+      </div>
+      <div class="player-pill bowler-pill">
+        <span class="pill-label">🎯 Bowling</span>
+        <select id="bowler-select" onchange="changeBowler()"></select>
+      </div>
+    </div>
+    <span class="sub-label">This Over</span>
+    <div class="balls-row" id="this-over-balls"></div>
+    <button class="btn-small" style="width:100%; margin-top:10px; background:#fef3c7; color:#92400e; border:1px solid #f59e0b;" onclick="undoLastBall()">↩️ Undo Last Ball</button>
+  </div>
+
+  <div class="card" id="score-ball-card">
+    <h2>Score Ball</h2>
+    <p class="helper-text" id="match-ended-notice" style="display:none; color:#c0392b; font-weight:600;">Match has ended. Only Undo is available.</p>
+    <div class="runs-grid" id="score-ball-buttons">
+      <button class="btn" style="background:#e5e5ea;" onclick="scoreBall(0)">0</button>
+      <button class="btn" style="background:var(--primary); color:white;" onclick="scoreBall(1)">1</button>
+      <button class="btn" style="background:var(--primary); color:white;" onclick="scoreBall(2)">2</button>
+      <button class="btn" style="background:var(--primary); color:white;" onclick="scoreBall(3)">3</button>
+      <button class="btn four" onclick="scoreBall(4)">4</button>
+      <button class="btn six" onclick="scoreBall(6)">6</button>
+      <button class="btn" style="background:#e5e5ea;" onclick="scoreWide()">Wide</button>
+      <button class="btn" style="background:#e5e5ea;" onclick="openExtraModal('no_ball')">No Ball</button>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:8px;" id="score-ball-actions">
+      <button class="btn wicket-btn" style="flex:1;" onclick="openWicketModal()">Wicket</button>
+      <button class="btn" style="flex:1; background:#8e8e93; color:white;" onclick="retireBatsman()">Retire Batsman</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Batting</h2>
+    <table id="batting-table"><thead><tr><th>Batsman</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card">
+    <button class="btn btn-secondary btn-full" onclick="openCompleteMatchModal()">End Match / Record Result</button>
+  </div>
+
+  <div class="card">
+    <h2>Bowling</h2>
+    <table id="bowling-table"><thead><tr><th>Bowler</th><th>Ov</th><th>R</th><th>W</th><th>Econ</th></tr></thead><tbody></tbody></table>
+  </div>
+</div>
+
+<div id="leaderboard-view" style="display:none;">
+  <div class="card">
+    <h2>Overall Leaderboard (from uploads)</h2>
+    <p class="helper-text">Aggregated from all uploaded weekly PDFs — mirrors your old app's leaderboard format.</p>
+    <table id="lb-batting-table">
+      <thead><tr><th>Player</th><th>M</th><th>Inn</th><th>R</th><th>4s</th><th>6s</th><th>Avg</th><th>SR</th><th>W-L</th><th>Win%</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <h2 style="margin-top:14px;">Bowling</h2>
+    <table id="lb-bowling-table">
+      <thead><tr><th>Player</th><th>M</th><th>Ov</th><th>W</th><th>RC</th><th>Econ</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <button class="btn-small" onclick="toggleAdminPanel()">⚙ Manage uploads</button>
+  </div>
+
+  <div class="card" id="admin-panel" style="display:none;">
+    <h2>Admin: Upload &amp; Manage</h2>
+    <span class="sub-label">Admin Password</span>
+    <input type="password" id="admin-password" class="field" placeholder="Enter admin password">
+
+    <span class="sub-label">Upload Weekly Stats PDF</span>
+    <p class="helper-text">Parses a leaderboard PDF exported from your old scoring app and merges it into the Overall Leaderboard (does not affect Live-tracked matches).</p>
+    <input type="file" id="pdf-upload-input" accept="application/pdf" class="field">
+    <input type="text" id="upload-label" class="field" placeholder="Label this upload (e.g. Week 12)">
+    <button class="btn-small btn-small-primary" onclick="uploadLeaderboardPdf()">Upload &amp; Parse PDF</button>
+    <div id="upload-status" style="font-size:12px; margin-top:6px; color:var(--sub);"></div>
+
+    <span class="sub-label" style="margin-top:14px; display:block;">Uploaded Batches</span>
+    <table id="uploads-table"><thead><tr><th>Label</th><th>Players</th><th>Uploaded</th><th></th></tr></thead><tbody></tbody></table>
+    <button class="btn-small btn-small-danger" onclick="deleteAllUploads()">Delete All Overall Leaderboard Data</button>
+  </div>
+
+  <div class="card">
+    <h2>Live-Tracked Leaderboard</h2>
+    <p class="helper-text">Stats from matches actually scored in this app.</p>
+    <table id="lb-live-batting-table">
+      <thead><tr><th>Player</th><th>M</th><th>Inn</th><th>R</th><th>4s</th><th>6s</th><th>Avg</th><th>SR</th><th>W-L</th><th>Win%</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="scorecard-view" style="display:none;">
+  <div class="card">
+    <h2>Full Scorecard</h2>
+    <select id="scorecard-match-select" class="field" onchange="loadFullScorecard()"></select>
+  </div>
+  <div id="scorecard-innings-container"></div>
+</div>
+
+<div id="stats-view" style="display:none;">
+  <div class="card">
+    <h2>Per-Over Progress</h2>
+    <select id="progress-match-select" class="field" onchange="loadOverProgress()"></select>
+    <div style="width:100%; height:260px;"><canvas id="over-progress-chart"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Match History</h2>
+    <table id="history-table"><thead><tr><th>Date</th><th>Match</th><th>Result</th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card">
+    <h2>Daily Stats</h2>
+    <input type="date" id="stats-date" class="field" onchange="loadDailyStats()">
+    <table id="daily-stats-table"><thead><tr><th>Player</th><th>Runs</th><th>Balls</th><th>Wkts</th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card">
+    <h2>Overall Stats</h2>
+    <table id="overall-stats-table"><thead><tr><th>Player</th><th>Inn</th><th>Runs</th><th>SR</th><th>Wkts</th><th>W-L</th><th>Win%</th></tr></thead><tbody></tbody></table>
+  </div>
+</div>
+
+<div id="extra-modal-container"></div>
+<div id="player-card-container"></div>
+
+<nav class="tabbar" id="main-tabbar" style="display:none;">
+  <button onclick="showView('setup')" id="nav-setup"><span class="icon">🏏</span>Setup</button>
+  <button onclick="showView('score')" id="nav-score"><span class="icon">📊</span>Live</button>
+  <button onclick="showView('scorecard')" id="nav-scorecard"><span class="icon">📋</span>Scorecard</button>
+  <button onclick="showView('leaderboard')" id="nav-leaderboard"><span class="icon">🏆</span>Leaders</button>
+  <button onclick="showView('stats')" id="nav-stats"><span class="icon">📈</span>Stats</button>
+</nav>
+
+<script src="app.js?v=31"></script>
+</body>
+</html>

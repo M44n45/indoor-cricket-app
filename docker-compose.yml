@@ -1,0 +1,25 @@
+services:
+  cricket-app:
+    build: .
+    container_name: indoor-cricket-app
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgres://cricket:cricket@db:5432/cricketdb
+      - PORT=3000
+    depends_on:
+      - db
+    restart: unless-stopped
+  db:
+    image: postgres:16-alpine
+    container_name: indoor-cricket-db
+    environment:
+      - POSTGRES_USER=cricket
+      - POSTGRES_PASSWORD=cricket
+      - POSTGRES_DB=cricketdb
+    volumes:
+      - cricket_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  cricket_pgdata:

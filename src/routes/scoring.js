@@ -438,7 +438,38 @@ router.get('/matches/:matchId/full-scorecard', async (req, res) => {
        WHERE bwr.innings_id=$1`,
       [inn.id]
     );
-    result.push({ innings: inn, batting: batting.rows, bowling: bowling.rows });
+
+    // Per-ball recap grouped by over, for the ball-by-ball strip in the scorecard
+    const events = await pool.query(
+      `SELECT be.*, bat.name AS batsman_name, bowl.name AS bowler_name
+       FROM ball_events be
+       JOIN players bat ON bat.id = be.batsman_id
+       JOIN players bowl ON bowl.id = be.bowler_id
+       WHERE be.innings_id=$1
+       ORDER BY be.over_no ASC, be.ball_no ASC, be.id ASC`,
+      [inn.id]
+    );
+    const oversMap = {};
+    for (const e of events.rows) {
+      if (!oversMap[e.over_no]) {
+        oversMap[e.over_no] = { over_no: e.over_no, bowler_name: e.bowler_name, balls: [], runs: 0, wickets: 0 };
+      }
+      const o = oversMap[e.over_no];
+      const totalBallRuns = e.runs + (e.extra_runs || 0);
+      o.runs += totalBallRuns;
+      if (e.is_wicket) o.wickets += 1;
+      o.batsman_name = e.batsman_name;
+      o.balls.push({
+        runs: e.runs,
+        extra_type: e.extra_type,
+        extra_runs: e.extra_runs,
+        is_wicket: e.is_wicket,
+        display: e.is_wicket ? 'W' : (e.extra_type === 'wide' ? 'Wd' : e.extra_type === 'no_ball' ? 'Nb' : String(e.runs))
+      });
+    }
+    const overs_recap = Object.values(oversMap).sort((a, b) => a.over_no - b.over_no);
+
+    result.push({ innings: inn, batting: batting.rows, bowling: bowling.rows, overs_recap });
   }
   res.json(result);
 });

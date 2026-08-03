@@ -88,6 +88,15 @@ function enterScorerMode() {
   loadPlayers();
 }
 
+function enterLeaderboardMode() {
+  state.appMode = 'scorer';
+  document.getElementById('mode-select-view').style.display = 'none';
+  document.getElementById('watch-view').style.display = 'none';
+  document.getElementById('main-tabbar').style.display = 'flex';
+  document.getElementById('share-watch-btn').style.display = 'none';
+  showView('leaderboard');
+}
+
 function enterWatchMode() {
   state.appMode = 'watcher';
   document.getElementById('mode-select-view').style.display = 'none';
@@ -311,12 +320,30 @@ async function loadFullScorecard() {
       const econ = b.overs_bowled > 0 ? (b.runs_conceded / b.overs_bowled).toFixed(2) : '0.00';
       return `<tr><td>${b.name}</td><td>${b.overs_bowled}</td><td>${b.runs_conceded}</td><td>${b.wickets}</td><td>${econ}</td></tr>`;
     }).join('');
+    const oversRecapHtml = (inn.overs_recap || []).map(over => {
+      const pills = over.balls.map(b => {
+        const isBoundary = b.runs === 4 || b.runs === 6;
+        const cls = b.is_wicket ? 'ball-pill wicket' : (isBoundary ? 'ball-pill boundary' : 'ball-pill');
+        return `<span class="${cls}">${b.display}</span>`;
+      }).join('');
+      return `
+        <div class="over-recap-row">
+          <div class="over-recap-header">Over ${over.over_no + 1} — <b>${over.bowler_name}</b> to ${over.batsman_name}
+            <span class="over-recap-total">(${over.runs} Runs, ${over.wickets} Wkt)</span>
+          </div>
+          <div class="over-recap-balls">${pills}</div>
+        </div>`;
+    }).join('');
     return `
       <div class="card">
         <h2>${teamLabel} — Innings ${inn.innings.innings_no} (${inn.innings.total_runs}/${inn.innings.total_wickets}, ${parseFloat(inn.innings.overs_completed).toFixed(1)} ov)</h2>
         <table class="mini-table"><thead><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody>${battingRows}</tbody></table>
         <h3 style="margin-top:10px; font-size:13px; color:var(--sub);">Bowling</h3>
         <table class="mini-table"><thead><tr><th>Bowler</th><th>O</th><th>R</th><th>W</th><th>Econ</th></tr></thead><tbody>${bowlingRows}</tbody></table>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0; font-size:13px; color:var(--sub);">Ball-by-Ball Recap</h3>
+        <div class="over-recap-container">${oversRecapHtml}</div>
       </div>`;
   }).join('');
 }

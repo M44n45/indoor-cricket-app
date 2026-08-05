@@ -35,6 +35,51 @@ let state = {
   isOffline: !navigator.onLine
 };
 
+function scoringIsAllowed() {
+  return !!state.matchId && !!state.inningsId && !state.matchIsComplete;
+}
+
+function ensureScoringAllowed() {
+  if (!state.matchId) {
+    alert('Select a match first before scoring.');
+    return false;
+  }
+  if (!state.inningsId) {
+    alert('Start the innings first before scoring.');
+    return false;
+  }
+  if (state.matchIsComplete) {
+    alert('Match has ended. Start a new match to continue scoring.');
+    return false;
+  }
+  return true;
+}
+
+function updateScoringControls() {
+  const badge = document.getElementById('score-match-status-badge');
+  if (scoringIsAllowed()) {
+    if (badge) badge.style.display = 'none';
+    unlockScoringControls();
+    return;
+  }
+
+  let badgeMessage = 'Match has ended. Only Undo is available.';
+  if (!state.matchId) {
+    badgeMessage = 'Select a match first to start scoring.';
+  } else if (!state.inningsId) {
+    badgeMessage = 'Start the innings first to enable scoring.';
+  } else if (state.matchIsComplete) {
+    badgeMessage = 'Match has ended. Start a new match to continue.';
+  }
+
+  if (badge) {
+    badge.innerText = badgeMessage;
+    badge.style.display = 'block';
+  }
+
+  lockScoringControls(state.matchIsComplete);
+}
+
 // ---- Offline coordination layer ----
 // Wraps the scoring-critical API calls so they queue to IndexedDB when the
 // network is down and replay automatically when connectivity is restored.
@@ -356,7 +401,10 @@ async function addPlayer() {
 }
 
 async function undoLastBall() {
-  if (!state.inningsId) return;
+  if (!state.inningsId) {
+    alert('No active innings selected to undo.');
+    return;
+  }
   const res = await apiFetch(`${API}/innings/${state.inningsId}/undo`, { method: 'POST' });
   const result = await res.json();
   if (result.error) {
@@ -1153,7 +1201,6 @@ async function continueScoring(matchId) {
   state.matchId = matchId;
   state.appMode = 'scorer';
   state.matchIsComplete = false;
-  unlockScoringControls();
   if (state.watchPollInterval) { clearInterval(state.watchPollInterval); state.watchPollInterval = null; }
   const av = document.getElementById('admin-view');
   if (av) { av.style.display = 'none'; av.innerHTML = ''; }
@@ -1253,6 +1300,7 @@ function showView(view, contextMatchId) {
   if (view === 'stats') { loadMatchHistory(); }
   if (view === 'leaderboard') { loadLeaderboard(); }
   if (view === 'scorecard') { loadMatchListForScorecard(contextMatchId); }
+  if (view === 'score') { updateScoringControls(); }
   window.scrollTo(0, 0);
 }
 
@@ -1781,7 +1829,7 @@ async function recordMatchResult(winnerTeam) {
 }
 
 async function scoreBall(runs) {
-  if (state.matchIsComplete) return;
+  if (!ensureScoringAllowed()) return;
   await apiFetch(`${API}/innings/${state.inningsId}/ball`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ runs })
   });
@@ -1789,7 +1837,7 @@ async function scoreBall(runs) {
 }
 
 async function scoreWide() {
-  if (state.matchIsComplete) return;
+  if (!ensureScoringAllowed()) return;
   await apiFetch(`${API}/innings/${state.inningsId}/ball`, {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ runs: 0, extra_type: 'wide', extra_runs: 1 })
@@ -1798,6 +1846,7 @@ async function scoreWide() {
 }
 
 function openWicketModal() {
+  if (!ensureScoringAllowed()) return;
   const bowlingTeamIds = state.currentBowlingTeamIds || [];
   const container = document.getElementById('extra-modal-container');
   const dismissalTypes = ['bowled','caught','run_out','stumped','other'];
@@ -1848,6 +1897,7 @@ function updateConfirmWicketButtonState() {
 }
 
 async function confirmWicket() {
+  if (!ensureScoringAllowed()) return;
   if (!state.pendingDismissalType) return;
   const fielderSelect = document.getElementById('fielder-select');
   const fielderId = fielderSelect && fielderSelect.value ? parseInt(fielderSelect.value) : null;
@@ -1914,6 +1964,7 @@ async function confirmNextBatsmanAndBowler() {
 }
 
 async function retireBatsman() {
+  if (!ensureScoringAllowed()) return;
   await apiFetch(`${API}/innings/${state.inningsId}/retire-striker`, { method: 'POST' });
   const inningsEnded = await refreshScorecard(true);
   if (!inningsEnded) {
@@ -1977,6 +2028,7 @@ function closeExtraModal() {
 }
 
 async function selectExtraRuns(runs) {
+  if (!ensureScoringAllowed()) return;
   const type = state.pendingExtraType; // 'wide' or 'no_ball'
   if (type === 'no_ball') {
     // No ball always carries a fixed 1-run penalty; 'runs' here are runs scored off the bat by the batsman.
@@ -1996,6 +2048,7 @@ async function selectExtraRuns(runs) {
 }
 
 async function changeBatsman() {
+  if (!ensureScoringAllowed()) return;
   const newId = parseInt(document.getElementById('striker-select').value);
   await apiFetch(`${API}/matches/innings/${state.inningsId}/change-batsman`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ new_striker_id: newId })
@@ -2004,6 +2057,7 @@ async function changeBatsman() {
 }
 
 async function changeBowler() {
+  if (!ensureScoringAllowed()) return;
   const newId = parseInt(document.getElementById('bowler-select').value);
   await apiFetch(`${API}/matches/innings/${state.inningsId}/change-bowler`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ new_bowler_id: newId })
@@ -2175,13 +2229,13 @@ async function checkInningsCompletion(data) {
 }
 
 
-function lockScoringControls() {
+function lockScoringControls(showMatchEndedNotice = true) {
   const buttons = document.getElementById('score-ball-buttons');
   const actions = document.getElementById('score-ball-actions');
   const notice = document.getElementById('match-ended-notice');
   if (buttons) buttons.classList.add('scoring-disabled');
   if (actions) actions.classList.add('scoring-disabled');
-  if (notice) notice.style.display = 'block';
+  if (notice) notice.style.display = showMatchEndedNotice ? 'block' : 'none';
 }
 
 function unlockScoringControls() {

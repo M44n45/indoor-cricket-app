@@ -103,6 +103,14 @@ body{
 .landing-footer-note{
   text-align:center; font-size:11.5px; color:var(--sub); margin:28px 16px 0; line-height:1.5; padding-bottom:20px;
 }
+.landing-meta-links{display:flex; justify-content:center; padding-bottom:16px;}
+.landing-meta-link{
+  background:none; border:none; color:var(--sub); font-size:12px; font-weight:600;
+  padding:6px 10px; cursor:pointer; opacity:0.8;
+}
+.landing-meta-link:active{opacity:1;}
+.about-source-link{color:var(--primary); font-weight:600; text-decoration:none;}
+.about-source-link:active{opacity:0.7;}
 
 .scoring-disabled{opacity:0.35; pointer-events:none;}
 
@@ -403,6 +411,49 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
   </div>
 
   <div class="landing-footer-note">🏆 Track leaderboards, full scorecards, and per-over stats once a match starts.</div>
+  <div class="landing-meta-links">
+    <button class="landing-meta-link" onclick="enterAboutMode()">ℹ️ About</button>
+  </div>
+</div>
+
+<div id="about-view" style="display:none;">
+  <div class="landing-hero" style="padding:36px 20px 24px;">
+    <div class="landing-hero-icon">🏏</div>
+    <h1 class="landing-title">CageCricket Live</h1>
+    <div class="landing-version-badge">v0.98</div>
+    <p class="landing-subtitle">A free, open-source scorer built for our indoor cricket group.</p>
+  </div>
+
+  <div class="card">
+    <h2>What it does</h2>
+    <p class="helper-text" style="font-size:13px; line-height:1.5;">
+      CageCricket Live is a mobile-friendly web app for scoring indoor cricket matches with custom house rules —
+      ball-by-ball scoring, live scoreboards, full scorecards, batting &amp; bowling leaderboards, and match history.
+      It's built for one specific group's rule set (attendance-first setup, a shared "common player", half-over
+      retirement thresholds, no byes/leg-byes), but the core is a general-purpose cricket scorer.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Free &amp; open to replicate</h2>
+    <p class="helper-text" style="font-size:13px; line-height:1.5;">
+      This project is open source. Anyone is welcome to fork it, self-host it for their own group, or use it as a
+      starting point for something else — no permission needed. If you spot a bug or build an improvement, pull
+      requests are welcome.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Built with</h2>
+    <p class="helper-text" style="font-size:13px; line-height:1.5;">
+      Node.js, Express and PostgreSQL on the backend, containerized with Docker Compose; a plain HTML/CSS/JS
+      progressive web app on the front end — no framework, so it's easy to read and modify.
+    </p>
+  </div>
+
+  <div class="landing-footer-note">
+    <a href="https://github.com/M44n45/indoor-cricket-app" target="_blank" rel="noopener" class="about-source-link">🔗 Source on GitHub</a>
+  </div>
 </div>
 
 <div id="admin-view" style="display:none;"></div>
@@ -695,7 +746,7 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
   <button onclick="showView('stats')" id="nav-stats"><span class="icon">🗓️</span>History</button>
 </nav>
 
-<script src="app.js?v=78"></script>
+<script src="app.js?v=79"></script>
   <button id="pwa-install-btn" class="pwa-install-btn" style="display:none;" onclick="triggerPwaInstall()">⬇️ Install App</button>
   <button id="floating-admin-gear" class="floating-admin-gear" onclick="enterAdminConsole()" aria-label="Admin Console">⚙️</button>
 </body>

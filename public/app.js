@@ -161,6 +161,18 @@ function enterWatchMode() {
   promptWatchMatchSelection();
 }
 
+function enterAboutMode() {
+  state.appMode = 'about';
+  document.getElementById('mode-select-view').style.display = 'none';
+  document.getElementById('watch-view').style.display = 'none';
+  document.getElementById('main-tabbar').style.display = 'none';
+  document.getElementById('share-watch-btn').style.display = 'none';
+  document.getElementById('about-view').style.display = 'block';
+  document.getElementById('topbar-title').innerText = 'About';
+  const gear = document.getElementById('floating-admin-gear');
+  if (gear) gear.style.display = 'none';
+}
+
 function backToModeSelect() {
   if (state.watchPollInterval) clearInterval(state.watchPollInterval);
   state.appMode = null;
@@ -170,6 +182,8 @@ function backToModeSelect() {
   document.getElementById('score-view').style.display = 'none';
   document.getElementById('leaderboard-view').style.display = 'none';
   document.getElementById('stats-view').style.display = 'none';
+  const aboutView = document.getElementById('about-view');
+  if (aboutView) aboutView.style.display = 'none';
   const av = document.getElementById('admin-view');
   if (av) { av.style.display = 'none'; av.innerHTML = ''; }
   const gear = document.getElementById('floating-admin-gear');

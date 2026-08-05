@@ -402,3 +402,28 @@ blue theme.
 
 Bumped: app.js cache-busting query string to ?v=78, sw.js CACHE_NAME to
 v14, visible version badge to v0.98.
+
+v0.98 UPDATE (About page)
+=============
+Added an "About" entry to the landing screen alongside Score a Match /
+Watch Live / Leaderboard & Stats. Opens a new about-view with a short
+description of the app, an explicit "free and open to replicate" note,
+and a link to the GitHub repo (https://github.com/M44n45/indoor-cricket-app).
+Uses the existing "← Modes" topbar button to go back, same as the other
+modes.
+
+Bumped: app.js cache-busting query string to ?v=79, sw.js CACHE_NAME to
+v15. Version badge left at v0.98 (no functional/scoring change).
+
+v0.98 UPDATE (About link resized/relocated)
+=============
+Reworked the About entry per feedback: removed it as a full-size landing
+card and replaced it with a small text link ("ℹ️ About") tucked under the
+footer note, in line with normal placement for a secondary/meta page.
+On the About view itself, moved the GitHub link out of a big primary
+button and into a small "🔗 Source on GitHub" text link in the page
+footer, matching how source-code links are usually presented (subtle,
+not a primary call-to-action).
+
+Bumped: sw.js CACHE_NAME to v16 (index.html changed). app.js itself is
+unchanged this pass, so its cache-busting query string stays at ?v=79.

@@ -967,9 +967,17 @@ async function checkAdminAuth() {
     loadAdminConsole();
     return;
   }
-  const res = await fetch(`${API}/admin/status`);
-  const data = await res.json();
-  if (data.configured) {
+  let configured = false;
+  try {
+    const res = await fetch(`${API}/admin/status`);
+    const data = await res.json();
+    configured = !!data.configured;
+  } catch (_) {
+    // Offline — can't reach server. Show login form so an existing admin can
+    // still attempt to log in; don't show the setup form as it would just fail.
+    configured = true;
+  }
+  if (configured) {
     renderAdminLoginForm();
   } else {
     renderAdminSetupForm();
@@ -1151,7 +1159,6 @@ async function continueScoring(matchId) {
         state.currentBowlingTeamIds = (innings.bowling_team === 'A' ? state.teamAIds : state.teamBIds).concat(state.commonPlayerIds || []);
         const battingName = innings.batting_team === 'A' ? (match.team_a_name || 'Team A') : (match.team_b_name || 'Team B');
         document.getElementById('sb-batting-team').innerText = battingName;
-        document.getElementById('sb-players-count').innerText = `(${innings.batting_team === 'A' ? (state.teamAIds||[]).length : (state.teamBIds||[]).length} players)`;
         showView('score');
         await refreshScorecard(true);
         return;
@@ -1636,8 +1643,7 @@ async function startInnings(inningsNo = 1) {
   // Cache innings for offline reads
   if (window.OfflineDB) OfflineDB.cacheSet('current_innings', innings);
   document.getElementById('sb-batting-team').innerText = teamName;
-  const battingIdsCount = battingTeam === 'A' ? state.teamAIds.length : state.teamBIds.length;
-  document.getElementById('sb-players-count').innerText = `(${battingIdsCount} players)`;
+  document.getElementById('sb-players-count').innerText = '';
   showView('score');
   await refreshScorecard();
   promptOpeningBatsmanAndBowler(battingTeam);

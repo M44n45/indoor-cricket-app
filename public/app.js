@@ -1302,7 +1302,11 @@ function showView(view, contextMatchId) {
   if (view === 'stats') { loadMatchHistory(); }
   if (view === 'leaderboard') { loadLeaderboard(); }
   if (view === 'scorecard') { loadMatchListForScorecard(contextMatchId); }
-  if (view === 'score') { updateScoringControls(); }
+  if (view === 'score') {
+    const banner = document.getElementById('sb-winner-banner');
+    if (banner) banner.style.display = 'none';
+    updateScoringControls();
+  }
   window.scrollTo(0, 0);
 }
 
@@ -1760,6 +1764,8 @@ async function startInnings(inningsNo = 1) {
   if (window.OfflineDB) OfflineDB.cacheSet('current_innings', innings);
   document.getElementById('sb-batting-team').innerText = teamName;
   document.getElementById('sb-players-count').innerText = '';
+  const banner = document.getElementById('sb-winner-banner');
+  if (banner) banner.style.display = 'none';
   showView('score');
   await refreshScorecard();
   promptOpeningBatsmanAndBowler(battingTeam);
@@ -2174,6 +2180,12 @@ async function refreshScorecard(skipBowlerPrompt = false) {
   renderScoreOversRecap(data.overs_recap);
 
   const inningsEnded = await checkInningsCompletion(data);
+
+  if (data.innings.innings_no === 1 && !inningsEnded) {
+    state.matchTarget = null;
+    state.firstInningsScore = null;
+    state.firstInningsTeamName = null;
+  }
 
   if (!inningsEnded && overJustCompleted && !skipBowlerPrompt) {
     promptNextBowler(data.bowling.map(b => b.player_id), data.innings.bowler_id);

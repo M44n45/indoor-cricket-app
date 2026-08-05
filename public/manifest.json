@@ -1,13 +1,13 @@
 {
-  "name": "Indoor Cricket Scorer",
-  "short_name": "Cricket Scorer",
+  "name": "CageCricket Live",
+  "short_name": "CageCricket",
   "description": "Indoor cricket scoring app with common-player and 2-over retirement rules",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0f1a12",
-  "theme_color": "#15803d",
+  "background_color": "#0a1128",
+  "theme_color": "#0b2f73",
   "icons": [
     {
       "src": "/icons/icon-192.png",

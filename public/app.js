@@ -140,6 +140,8 @@ function enterLeaderboardMode() {
   document.getElementById('watch-view').style.display = 'none';
   document.getElementById('main-tabbar').style.display = 'flex';
   document.getElementById('share-watch-btn').style.display = 'none';
+  const gear = document.getElementById('floating-admin-gear');
+  if (gear) gear.style.display = 'none';
   showView('leaderboard');
 }
 
@@ -154,6 +156,8 @@ function enterWatchMode() {
   document.getElementById('stats-view').style.display = 'none';
   document.getElementById('watch-view').style.display = 'block';
   document.getElementById('topbar-title').innerText = 'Live Match';
+  const gear = document.getElementById('floating-admin-gear');
+  if (gear) gear.style.display = 'none';
   promptWatchMatchSelection();
 }
 
@@ -172,7 +176,7 @@ function backToModeSelect() {
   if (gear) gear.style.display = 'block';
   document.getElementById('main-tabbar').style.display = 'none';
   document.getElementById('share-watch-btn').style.display = 'none';
-  document.getElementById('topbar-title').innerText = 'Cricket Scorer';
+  document.getElementById('topbar-title').innerText = 'CageCricket Live';
   document.getElementById('mode-select-view').style.display = 'block';
 }
 
@@ -705,19 +709,23 @@ async function loadAdminConsole() {
   const matches = await res.json();
   const rows = matches.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map(m => {
     const title = m.match_name || `${m.team_a_name} vs ${m.team_b_name}`;
-    return `<div class="card" style="margin-bottom:10px;">
-      <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
-        <div>
-          <div style="font-weight:800;">${title}</div>
-          <div class="helper-text">Status: <b>${m.status}</b></div>
-        </div>
-        <button class="btn btn-primary" onclick="markMatchCompleted(${m.id})">Mark Completed</button><button class="btn btn-secondary" style="margin-left:8px;" onclick="deleteMatch(${m.id})">Delete</button>${m.status==='in_progress' ? `<button class="btn btn-secondary" style="margin-left:8px;" onclick="continueScoring(${m.id})">Continue Scoring</button>` : ''}
+    const canResume = m.status === 'in_progress' || m.status === 'completed' || m.status === 'abandoned';
+    const resumeLabel = m.status === 'in_progress' ? 'Continue Scoring' : 'Resume & Edit';
+    return `<div class="card admin-match-card">
+      <div class="admin-match-header">
+        <div class="admin-match-title">${title}</div>
+        <div class="helper-text">Status: <b>${m.status}</b></div>
+      </div>
+      <div class="admin-match-actions">
+        ${m.status === 'in_progress' ? `<button class="btn btn-primary" onclick="markMatchCompleted(${m.id})">Mark Completed</button>` : ''}
+        ${canResume ? `<button class="btn btn-secondary" onclick="continueScoring(${m.id})">${resumeLabel}</button>` : ''}
+        <button class="btn btn-secondary admin-btn-danger" onclick="deleteMatch(${m.id})">Delete</button>
       </div>
     </div>`;
   }).join('');
   const gear = document.getElementById('floating-admin-gear');
   if (gear) gear.style.display = 'none';
-  document.getElementById('admin-view').innerHTML = `<div class="card" style="margin-top:24px;"><div style="display:flex; justify-content:space-between; align-items:center; gap:12px;"><div><h2>Existing Matches</h2><p class="helper-text">Use this to force-match completion when needed.</p></div><button class="btn btn-secondary" onclick="backToModeSelect()">Back</button></div>${rows || '<p class="helper-text">No matches found.</p>'}</div>`;
+  document.getElementById('admin-view').innerHTML = `<div class="card" style="margin-top:24px;"><div style="display:flex; justify-content:space-between; align-items:center; gap:12px;"><div><h2>Existing Matches</h2><p class="helper-text">Use this to force-match completion, resume a match to fix a mistake, or delete a match.</p></div><button class="btn btn-secondary" style="width:auto; flex:0 0 auto;" onclick="backToModeSelect()">Back</button></div>${rows || '<p class="helper-text">No matches found.</p>'}</div>`;
 }
 
 async function markMatchCompleted(matchId) {
@@ -730,6 +738,8 @@ async function markMatchCompleted(matchId) {
 async function continueScoring(matchId) {
   state.matchId = matchId;
   state.appMode = 'scorer';
+  state.matchIsComplete = false;
+  unlockScoringControls();
   if (state.watchPollInterval) { clearInterval(state.watchPollInterval); state.watchPollInterval = null; }
   const av = document.getElementById('admin-view');
   if (av) { av.style.display = 'none'; av.innerHTML = ''; }
@@ -815,9 +825,9 @@ function showView(view, contextMatchId) {
   document.getElementById('nav-scorecard').classList.toggle('active', view === 'scorecard');
   document.getElementById('nav-leaderboard').classList.toggle('active', view === 'leaderboard');
   document.getElementById('nav-stats').classList.toggle('active', view === 'stats');
-  const titles = { setup: 'Setup Match', score: 'Live Score', scorecard: 'Scorecard', leaderboard: 'Leaderboard', stats: 'Stats' };
+  const titles = { setup: 'Setup Match', score: 'Live Score', scorecard: 'Scorecard', leaderboard: 'Leaderboard', stats: 'Match History' };
   document.getElementById('topbar-title').innerText = titles[view];
-  if (view === 'stats') { loadDailyStats(); loadOverallStats(); loadMatchHistory(); }
+  if (view === 'stats') { loadMatchHistory(); }
   if (view === 'leaderboard') { loadLeaderboard(); }
   if (view === 'scorecard') { loadMatchListForScorecard(contextMatchId); }
   window.scrollTo(0, 0);
@@ -881,22 +891,41 @@ async function loadFullScorecard() {
 }
 
 
+let leaderboardMode = 'overall';
+
+function switchLeaderboardMode(mode) {
+  leaderboardMode = mode;
+  document.getElementById('lb-mode-overall-btn').classList.toggle('active', mode === 'overall');
+  document.getElementById('lb-mode-day-btn').classList.toggle('active', mode === 'day');
+  const pickerCard = document.getElementById('lb-day-picker-card');
+  if (pickerCard) pickerCard.style.display = mode === 'day' ? 'block' : 'none';
+  const dateInput = document.getElementById('lb-date-picker');
+  if (mode === 'day' && dateInput && !dateInput.value) {
+    dateInput.value = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
+  }
+  loadLeaderboard();
+}
+
 async function loadLeaderboard() {
-  const res = await fetch(`${API}/stats/leaderboard`);
+  const dateInput = document.getElementById('lb-date-picker');
+  const dateQuery = (leaderboardMode === 'day' && dateInput && dateInput.value) ? `?date=${dateInput.value}` : '';
+  const res = await fetch(`${API}/stats/leaderboard${dateQuery}`);
   const data = await res.json();
-  document.querySelector('#lb-live-batting-table tbody').innerHTML = data.batting.map(r => `
+  const emptyMsg = leaderboardMode === 'day' ? 'No matches played on this day.' : 'No matches recorded yet.';
+  const battingBody = document.querySelector('#lb-live-batting-table tbody');
+  battingBody.innerHTML = data.batting.length ? data.batting.map(r => `
     <tr>
       <td class="clickable-name" onclick="showPlayerCard(${r.player_id || r.id})">${r.name}</td><td>${r.matches_played}</td><td>${r.innings_played}</td><td>${r.total_runs}</td>
       <td>${r.fours}</td><td>${r.sixes}</td><td>${r.avg}</td><td>${Math.round(r.strike_rate)}</td>
       <td>${r.wins}-${r.losses}</td><td>${r.win_pct}%</td>
-    </tr>`).join('');
+    </tr>`).join('') : `<tr><td colspan="10" class="helper-text">${emptyMsg}</td></tr>`;
   const liveBowlingBody = document.querySelector('#lb-live-bowling-table tbody');
-  if (liveBowlingBody && data.bowling) {
-    liveBowlingBody.innerHTML = data.bowling.map(r => `
+  if (liveBowlingBody) {
+    liveBowlingBody.innerHTML = (data.bowling && data.bowling.length) ? data.bowling.map(r => `
       <tr>
         <td class="clickable-name" onclick="showPlayerCard(${r.player_id || r.id})">${r.name}</td><td>${r.matches_played}</td><td>${r.overs_bowled}</td>
         <td>${r.wickets}</td><td>${r.runs_conceded}</td><td>${r.economy}</td>
-      </tr>`).join('');
+      </tr>`).join('') : `<tr><td colspan="6" class="helper-text">${emptyMsg}</td></tr>`;
   }
 }
 function switchLeaderboardTab(tab) {
@@ -909,7 +938,11 @@ function switchLeaderboardTab(tab) {
 
 async function loadMatchHistory() {
   const res = await fetch(`${API}/stats/matches-history`);
-  const rows = await res.json();
+  const allRows = await res.json();
+  // Match History is a record of what already happened — matches still being
+  // set up or actively scored belong in Watch Live / the scorer's own tabs,
+  // not here.
+  const rows = (allRows || []).filter(r => r.status === 'completed' || r.status === 'abandoned');
   const container = document.getElementById('history-container');
   if (!container) return;
   if (!rows || rows.length === 0) {
@@ -1840,22 +1873,6 @@ async function renderThisOverBalls(innings) {
     const label = b.is_wicket ? 'W' : (b.extra_type === 'wide' ? 'Wd' : b.extra_type === 'no_ball' ? 'Nb' : String(b.runs));
     return `<span class="${cls}">${label}</span>`;
   }).join('');
-}
-
-async function loadDailyStats() {
-  const date = document.getElementById('stats-date').value;
-  const url = date ? `${API}/stats/daily?date=${date}` : `${API}/stats/daily`;
-  const res = await fetch(url);
-  const rows = await res.json();
-  document.querySelector('#daily-stats-table tbody').innerHTML = rows.map(r =>
-    `<tr><td>${r.name}</td><td>${r.total_runs}</td><td>${r.balls_faced}</td><td>${r.wickets}</td></tr>`).join('');
-}
-
-async function loadOverallStats() {
-  const res = await fetch(`${API}/stats/overall`);
-  const rows = await res.json();
-  document.querySelector('#overall-stats-table tbody').innerHTML = rows.map(r =>
-    `<tr><td>${r.name}</td><td>${r.innings_played}</td><td>${r.total_runs}</td><td>${Math.round(r.strike_rate)}</td><td>${r.wickets}</td><td>${r.wins}-${r.losses}</td><td>${r.win_pct}%</td></tr>`).join('');
 }
 
 // On load: show the Scorer/Watcher choice screen. Do NOT auto-jump into setup.

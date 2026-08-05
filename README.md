@@ -1,4 +1,4 @@
-# Indoor Cricket Scoring App
+# CageCricket Live
 
 A modern, iOS-styled mobile web app for scoring indoor cricket with custom rules, plus historical stats import.
 

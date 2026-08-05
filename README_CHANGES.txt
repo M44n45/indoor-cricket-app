@@ -317,3 +317,88 @@ players ticked in Step 1. Step 1 (attendance ticking) is unchanged.
 
 Bumped app.js cache-busting query string to ?v=75, sw.js CACHE_NAME to
 v11, and the visible version badge to v0.95.
+
+v0.96 UPDATE
+=============
+Admin console:
+- Fixed button overflow: .btn-primary/.btn-secondary both force width:100%,
+  which broke down badly with 3 buttons inline. Match rows now use a
+  flex-wrap action row (title/status on its own line, buttons wrap on
+  narrow screens instead of overflowing).
+- "Continue Scoring" now also appears (as "Resume & Edit") for completed
+  and abandoned matches, not just in_progress ones.
+- Fixed a latent bug where state.matchIsComplete could still be true from
+  a previous match when resuming a different/completed one, silently
+  blocking all scoring input with no visible error. Reset on resume.
+
+Floating admin gear icon:
+- Root cause found: enterLeaderboardMode() and enterWatchMode() never
+  hid the gear button, so entering Leaderboard mode directly from the
+  landing page left the fixed bottom-right gear sitting on top of the
+  rightmost tab icon (History). Both now hide it like every other mode
+  entry point already did.
+
+Stats tab -> renamed "Match History":
+- Nav label/icon updated (🗓️ History). Page trimmed to just the match
+  history cards; the old Daily Stats / Overall Stats tables were removed
+  (that data now lives in the Leaders tab's new Day/Overall toggle).
+- Now filtered to only completed/abandoned matches — in-progress matches
+  no longer show up here (they belong in Watch Live / the scorer tabs).
+
+Leaders tab -> Day / Overall toggle:
+- New toggle above the existing Batting/Bowling sub-tabs. "Overall" is
+  unchanged existing behavior. "Day" adds a date picker and calls
+  GET /api/stats/leaderboard?date=YYYY-MM-DD (src/routes/stats.js),
+  which scopes runs, wickets, win/loss, and even which players appear
+  at all to matches played on that single day.
+
+App renamed: Indoor Cricket -> CageCricket Live
+- Updated: <title>, apple-mobile-web-app-title meta, topbar title (incl.
+  the JS reset in backToModeSelect), landing page h1, manifest.json
+  name/short_name ("CageCricket Live" / "CageCricket"), README.md, and
+  the sw.js file header comment.
+
+Bumped: app.js cache-busting query string to ?v=76, sw.js CACHE_NAME to
+v12, visible version badge to v0.96.
+
+v0.97 UPDATE — India jersey color theme
+=========================================
+Replaced the green theme with an India-cricket-jersey-inspired palette:
+deep blue primary (#1e56c9 / #0b2f73 dark) with saffron/orange accents
+(#ff9933), matching the current Team India kit.
+
+- :root CSS variables updated (--primary, --primary-dark, --accent, --bg,
+  --bg-light, --text, --border) — most of the UI recolors automatically
+  since it's variable-driven.
+- Manually recolored the remaining hardcoded greens: scoreboard gradient
+  and text, primary button gradient/shadow, landing page hero gradient,
+  landing version badge (now saffron), "common player" chips (now
+  saffron instead of green, to stay distinct from the new blue primary),
+  leaderboard batting-card accent, striker pill background, and a couple
+  of stray green-tinted text colors sitting on the scoreboard.
+- App icons (icon-192, icon-512, icon-512-maskable, apple-touch-icon)
+  had a green gradient background baked into the PNGs themselves. Used a
+  targeted HSV hue-shift (green hues -> blue, ~146° -> ~220°) to recolor
+  just the background while leaving the bat/ball artwork's colors
+  untouched — no manual redraw needed.
+- manifest.json background_color/theme_color updated to match, plus
+  <meta name="theme-color"> in index.html.
+- Intentionally left alone: team-a/team-b chip colors (red/blue — these
+  identify teams, not app branding) and the teamColorCss() name->color
+  lookup in app.js (used when a team is literally named "Green", etc.)
+
+Bumped: app.js cache-busting query string to ?v=77, sw.js CACHE_NAME to
+v13 (important this time since cached icons changed too), visible
+version badge to v0.97.
+
+v0.98 UPDATE
+=============
+Fixed the topbar, which was still showing the old dark-green gradient
+after the v0.97 color theme change. It had its own standalone
+background:linear-gradient(...) not driven by the --primary/--bg CSS
+variables, so it slipped past that pass. Changed to
+linear-gradient(135deg,#0a1128,#12224d) to match the rest of the navy/
+blue theme.
+
+Bumped: app.js cache-busting query string to ?v=78, sw.js CACHE_NAME to
+v14, visible version badge to v0.98.

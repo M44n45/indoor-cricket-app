@@ -3,22 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>Cricket Scorer</title>
+<title>CageCricket Live</title>
 <link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#15803d">
+<meta name="theme-color" content="#0b2f73">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Cricket Scorer">
+<meta name="apple-mobile-web-app-title" content="CageCricket Live">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
 :root{
-  --bg:#0f1a12; --bg-light:#f4f8f5; --card:#ffffff; --primary:#22c55e; --primary-dark:#15803d;
-  --accent:#facc15; --red:#ef4444; --orange:#f97316; --blue:#3b82f6; --text:#0f1a12; --sub:#6b7280;
-  --border:#e2e8e4; --radius:18px; --safe-top:env(safe-area-inset-top);
+  --bg:#0a1128; --bg-light:#f4f6fb; --card:#ffffff; --primary:#1e56c9; --primary-dark:#0b2f73;
+  --accent:#ff9933; --red:#ef4444; --orange:#f97316; --blue:#3b82f6; --text:#0f1a2e; --sub:#6b7280;
+  --border:#e2e6ec; --radius:18px; --safe-top:env(safe-area-inset-top);
 }
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
 body{
@@ -27,22 +27,22 @@ body{
   padding-bottom:90px;
 }
 .topbar{
-  position:sticky; top:0; z-index:50; background:linear-gradient(135deg,#16281a,#1f3d26); backdrop-filter:blur(20px);
+  position:sticky; top:0; z-index:50; background:linear-gradient(135deg,#0a1128,#12224d); backdrop-filter:blur(20px);
   padding:calc(10px + var(--safe-top)) 16px 10px; border-bottom:1px solid rgba(255,255,255,0.08);
   display:flex; align-items:center; justify-content:space-between;
 }
 .topbar h1{font-size:17px; font-weight:700; margin:0; color:white; letter-spacing:0.2px;}
 .scoreboard{
-  margin:10px 12px; background:linear-gradient(135deg,#16a34a,#0f5c2a); color:white;
-  border-radius:var(--radius); padding:18px; box-shadow:0 6px 18px rgba(22,163,74,0.25);
+  margin:10px 12px; background:linear-gradient(135deg,#1e56c9,#0b2f73); color:white;
+  border-radius:var(--radius); padding:18px; box-shadow:0 6px 18px rgba(11,47,115,0.3);
   position:relative; overflow:hidden;
 }
 .scoreboard::after{
   content:"🏏"; position:absolute; right:-6px; bottom:-14px; font-size:70px; opacity:0.08; transform:rotate(-12deg);
 }
-.scoreboard .teams{display:flex; justify-content:space-between; font-size:13px; color:#d9f2e2; margin-bottom:4px; font-weight:600;}
+.scoreboard .teams{display:flex; justify-content:space-between; font-size:13px; color:#cfe0fa; margin-bottom:4px; font-weight:600;}
 .scoreboard .runs{font-size:40px; font-weight:800; letter-spacing:-0.5px;}
-.scoreboard .meta{display:flex; justify-content:space-between; margin-top:6px; font-size:13px; color:#c9ebd4;}
+.scoreboard .meta{display:flex; justify-content:space-between; margin-top:6px; font-size:13px; color:#c7d9f7;}
 .scoreboard .crr{color:var(--accent); font-weight:700;}
 .card{
   background:var(--card); border-radius:var(--radius); margin:10px 12px; padding:14px;
@@ -57,7 +57,7 @@ body{
   min-height:48px; touch-action:manipulation; transition:transform .08s;
 }
 .btn:active{transform:scale(0.95);}
-.btn-primary{background:linear-gradient(135deg,#22c55e,#15803d); color:white; width:100%; box-shadow:0 3px 10px rgba(34,197,94,0.35);}
+.btn-primary{background:linear-gradient(135deg,#1e56c9,#0b2f73); color:white; width:100%; box-shadow:0 3px 10px rgba(30,86,201,0.35);}
 .btn-secondary{background:#eef2ee; color:var(--text); width:100%;}
 .btn-full{width:100%; margin-top:6px;}
 
@@ -79,13 +79,13 @@ body{
 .team-chip.b{background:#fdecea; color:#c0392b;}
 .helper-text{font-size:11.5px; color:var(--sub); margin:0 0 6px; line-height:1.3;}
 .landing-hero{
-  text-align:center; padding:56px 20px 28px; background:linear-gradient(160deg,#16281a,#1f3d26 60%,#22c55e 140%);
+  text-align:center; padding:56px 20px 28px; background:linear-gradient(160deg,#0a1128,#12224d 60%,#1e56c9 140%);
   border-radius:0 0 28px 28px; margin:-16px -16px 24px; color:white;
 }
 .landing-hero-icon{font-size:48px; line-height:1; margin-bottom:10px; filter:drop-shadow(0 4px 10px rgba(0,0,0,0.25));}
 .landing-title{font-size:26px; font-weight:800; margin:0 0 6px; letter-spacing:-0.3px;}
 .landing-subtitle{font-size:13.5px; color:rgba(255,255,255,0.85); margin:0; line-height:1.5; max-width:280px; margin-left:auto; margin-right:auto;}
-.landing-version-badge{display:inline-block; font-size:10.5px; opacity:0.6; background:rgba(255,255,255,0.15); border-radius:20px; padding:2px 10px; margin-bottom:10px;}
+.landing-version-badge{display:inline-block; font-size:10.5px; opacity:0.85; color:var(--accent); font-weight:700; background:rgba(255,255,255,0.15); border-radius:20px; padding:2px 10px; margin-bottom:10px;}
 .landing-actions{display:flex; flex-direction:column; gap:12px; padding:0 16px;}
 .landing-card{
   display:flex; align-items:center; gap:14px; width:100%; text-align:left; background:var(--card);
@@ -137,7 +137,7 @@ body{
 .player-pill{
   flex:1; border-radius:14px; padding:12px; display:flex; flex-direction:column; gap:6px;
 }
-.player-pill.striker-pill{background:linear-gradient(135deg,#eafaf0,#d7f5e3);}
+.player-pill.striker-pill{background:linear-gradient(135deg,#eaf1fb,#d7e6f8);}
 .player-pill.bowler-pill{background:linear-gradient(135deg,#fff4e5,#ffe9cc);}
 .pill-label{font-size:12px; font-weight:600; color:var(--text); opacity:0.75;}
 .unassigned-pool{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; min-height:44px; padding:8px; background:#f7f7fa; border-radius:12px;}
@@ -171,8 +171,8 @@ body{
 }
 .player-chip.team-a{background:#fee2e2; color:#b91c1c; border-color:#ef4444;}
 .player-chip.team-b{background:#dbeafe; color:#1d4ed8; border-color:#3b82f6;}
-.player-chip.common{background:#dcfce7; color:#15803d; border-color:#22c55e;}
-.team-count-chip.common{background:#dcfce7; color:#15803d;}
+.player-chip.common{background:#ffedd5; color:#c2410c; border-color:#ff9933;}
+.team-count-chip.common{background:#ffedd5; color:#c2410c;}
 .team-count-row{display:flex; gap:8px; margin-top:8px;}
 .team-count-chip{
   flex:1; text-align:center; padding:6px 8px; border-radius:8px; font-size:12px; font-weight:700;
@@ -218,7 +218,7 @@ body{
 .clickable-name{cursor:pointer; text-decoration:underline; text-decoration-color:transparent; transition:text-decoration-color .15s;}
 .clickable-name:active{text-decoration-color:var(--primary);}
 .clickable-row{cursor:pointer;}
-.clickable-row:active{background:rgba(34,197,94,0.08);}
+.clickable-row:active{background:rgba(30,86,201,0.08);}
 .watch-card-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-top:8px;}
 .watch-match-card{width:100%; text-align:left; border:1px solid var(--border); border-radius:18px; padding:12px; background:linear-gradient(180deg,#ffffff,#f8fafc); box-shadow:0 6px 18px rgba(15,23,42,0.06); cursor:pointer; display:flex; flex-direction:column; gap:8px;}
 .watch-card-top{display:flex; align-items:flex-start; justify-content:space-between; gap:10px;}
@@ -241,6 +241,12 @@ body{
 .history-result-win{color:var(--primary-dark); font-weight:700;}
 .history-result-tie{color:var(--orange); font-weight:700;}
 .history-result-progress{color:var(--blue); font-weight:700;}
+.admin-match-card{margin-bottom:10px;}
+.admin-match-header{margin-bottom:10px;}
+.admin-match-title{font-weight:800; font-size:14.5px;}
+.admin-match-actions{display:flex; flex-wrap:wrap; gap:8px;}
+.admin-match-actions .btn{width:auto; flex:1 1 120px; padding:11px 10px; font-size:13.5px; min-height:42px;}
+.admin-btn-danger{background:#fee2e2 !important; color:#b91c1c !important;}
 .ball-by-ball{display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;}
 .ball-chip{padding:8px 10px; border-radius:999px; background:#eef2ff; color:#1e3a8a; font-weight:700; font-size:12px;}
 .floating-admin-gear{position:fixed; right:16px; bottom:16px; width:48px; height:48px; border-radius:999px; border:none; background:#111827; color:#fff; font-size:22px; box-shadow:0 10px 24px rgba(0,0,0,0.24); z-index:9999; display:block;}
@@ -307,7 +313,7 @@ nav.tabbar button{
 }
 nav.tabbar button .icon{font-size:20px;}
 nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
-.tabbar button.active .icon{filter:drop-shadow(0 1px 2px rgba(34,197,94,0.3));}
+.tabbar button.active .icon{filter:drop-shadow(0 1px 2px rgba(30,86,201,0.3));}
 
 .over-recap-container{padding:0;}
 .over-recap-row{background:#fafafa; border-radius:10px; padding:10px 12px; margin-bottom:10px; border:1px solid #eee;}
@@ -328,11 +334,12 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
 .lb-card{border-radius:14px; overflow:hidden; padding-bottom:16px;}
 .lb-card-batting{background:linear-gradient(135deg, #fef9c3 0%, #ffffff 60%); border-left:4px solid #eab308;}
 .lb-card-bowling{background:linear-gradient(135deg, #dbeafe 0%, #ffffff 60%); border-left:4px solid #3b82f6;}
-.lb-card-live-batting{background:linear-gradient(135deg, #dcfce7 0%, #ffffff 60%); border-left:4px solid #16a34a;}
+.lb-card-live-batting{background:linear-gradient(135deg, #dbeafe 0%, #ffffff 60%); border-left:4px solid #1e56c9;}
 .lb-card-live-bowling{background:linear-gradient(135deg, #fce7f3 0%, #ffffff 60%); border-left:4px solid #db2777;}
 .lb-section-title{margin:0 0 6px 0; font-size:16px; display:flex; align-items:center; gap:6px;}
 .lb-table-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch;}
 .lb-tabbar{display:flex; gap:8px; margin:10px 12px 6px;}
+.lb-mode-tabbar{display:flex; gap:8px; margin:14px 12px 6px;}
 .lb-tab-btn{
   flex:1; padding:10px; border-radius:12px; border:1px solid var(--border); background:var(--card);
   font-size:13.5px; font-weight:700; color:var(--sub); cursor:pointer;
@@ -350,19 +357,19 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
 .lb-table tbody tr:hover{background:rgba(0,0,0,0.05);}
 .lb-card-batting .lb-table tbody tr:first-child td{font-weight:700; color:#92400e;}
 .lb-card-bowling .lb-table tbody tr:first-child td{font-weight:700; color:#1e40af;}
-.lb-card-live-batting .lb-table tbody tr:first-child td{font-weight:700; color:#15803d;}
+.lb-card-live-batting .lb-table tbody tr:first-child td{font-weight:700; color:#0b2f73;}
 .lb-card-live-bowling .lb-table tbody tr:first-child td{font-weight:700; color:#be185d;}
 </style>
 </head>
 <body>
 
-<div class="topbar"><h1 id="topbar-title">Cricket Scorer <span style="font-size:10px; opacity:0.55; font-weight:400; vertical-align:middle;">v0.95</span></h1><div style="display:flex; gap:6px;"><button id="back-to-mode-btn" class="btn-small" onclick="backToModeSelect()">← Modes</button><button id="share-watch-btn" class="btn-small" style="display:none;" onclick="shareWatchLink()">🔗 Share</button></div></div>
+<div class="topbar"><h1 id="topbar-title">CageCricket Live <span style="font-size:10px; opacity:0.55; font-weight:400; vertical-align:middle;">v0.98</span></h1><div style="display:flex; gap:6px;"><button id="back-to-mode-btn" class="btn-small" onclick="backToModeSelect()">← Modes</button><button id="share-watch-btn" class="btn-small" style="display:none;" onclick="shareWatchLink()">🔗 Share</button></div></div>
 
 <div id="mode-select-view">
   <div class="landing-hero">
     <div class="landing-hero-icon">🏏</div>
-    <h1 class="landing-title">Indoor Cricket</h1>
-    <div class="landing-version-badge">v0.95</div>
+    <h1 class="landing-title">CageCricket Live</h1>
+    <div class="landing-version-badge">v0.98</div>
     <p class="landing-subtitle">Score live matches, track stats, and follow along ball by ball.</p>
   </div>
 
@@ -626,6 +633,13 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
 </div>
 
 <div id="leaderboard-view" style="display:none;">
+  <div class="lb-mode-tabbar">
+    <button id="lb-mode-overall-btn" class="lb-tab-btn active" onclick="switchLeaderboardMode('overall')">🌐 Overall</button>
+    <button id="lb-mode-day-btn" class="lb-tab-btn" onclick="switchLeaderboardMode('day')">📅 Day</button>
+  </div>
+  <div class="card" id="lb-day-picker-card" style="display:none; padding:12px 14px;">
+    <input type="date" id="lb-date-picker" class="field" onchange="loadLeaderboard()">
+  </div>
   <div class="lb-tabbar">
     <button id="lb-tab-batting-btn" class="lb-tab-btn active" onclick="switchLeaderboardTab('batting')">🏏 Batting</button>
     <button id="lb-tab-bowling-btn" class="lb-tab-btn" onclick="switchLeaderboardTab('bowling')">🎯 Bowling</button>
@@ -665,17 +679,8 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
 <div id="stats-view" style="display:none;">
   <div class="card">
     <h2>Match History</h2>
-    <p class="helper-text">Tap a match card to view its full scorecard.</p>
+    <p class="helper-text">Completed and abandoned matches. Tap a card to view its full scorecard.</p>
     <div id="history-container"></div>
-  </div>
-  <div class="card">
-    <h2>Daily Stats</h2>
-    <input type="date" id="stats-date" class="field" onchange="loadDailyStats()">
-    <table id="daily-stats-table"><thead><tr><th>Player</th><th>Runs</th><th>Balls</th><th>Wkts</th></tr></thead><tbody></tbody></table>
-  </div>
-  <div class="card">
-    <h2>Overall Stats</h2>
-    <table id="overall-stats-table"><thead><tr><th>Player</th><th>Inn</th><th>Runs</th><th>SR</th><th>Wkts</th><th>W-L</th><th>Win%</th></tr></thead><tbody></tbody></table>
   </div>
 </div>
 
@@ -687,10 +692,10 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
   <button onclick="showView('score')" id="nav-score"><span class="icon">📊</span>Live</button>
   <button onclick="showView('scorecard')" id="nav-scorecard"><span class="icon">📋</span>Scorecard</button>
   <button onclick="showView('leaderboard')" id="nav-leaderboard"><span class="icon">🏆</span>Leaders</button>
-  <button onclick="showView('stats')" id="nav-stats"><span class="icon">📈</span>Stats</button>
+  <button onclick="showView('stats')" id="nav-stats"><span class="icon">🗓️</span>History</button>
 </nav>
 
-<script src="app.js?v=75"></script>
+<script src="app.js?v=78"></script>
   <button id="pwa-install-btn" class="pwa-install-btn" style="display:none;" onclick="triggerPwaInstall()">⬇️ Install App</button>
   <button id="floating-admin-gear" class="floating-admin-gear" onclick="enterAdminConsole()" aria-label="Admin Console">⚙️</button>
 </body>

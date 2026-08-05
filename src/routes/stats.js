@@ -106,14 +106,18 @@ router.get('/matches-history', async (req, res) => {
   res.json(result.rows);
 });
 
-// Full leaderboard mimicking the reference PDF format (batting + bowling)
+// Full leaderboard mimicking the reference PDF format (batting + bowling).
+// Optional ?date=YYYY-MM-DD scopes everything (runs, wickets, win/loss, even
+// which players appear at all) to matches played on that single day.
 router.get('/leaderboard', async (req, res) => {
+  const dateParam = req.query.date || null;
   const battingRes = await pool.query(`
     WITH player_matches AS (
       SELECT DISTINCT mp.player_id, mp.match_id, mp.team, m.winner_team, m.status
       FROM match_players mp
       JOIN matches m ON m.id = mp.match_id
       WHERE m.status = 'completed' AND m.winner_team IS NOT NULL AND m.winner_team <> 'tie'
+        AND ($1::date IS NULL OR m.match_date = $1::date)
     ),
     team_count_per_match AS (
       SELECT player_id, match_id, COUNT(DISTINCT team) AS teams_played
@@ -131,8 +135,17 @@ router.get('/leaderboard', async (req, res) => {
       FROM decisive_player_matches GROUP BY player_id
     ),
     match_counts AS (
-      SELECT player_id, COUNT(DISTINCT match_id) AS matches_played
-      FROM match_players GROUP BY player_id
+      SELECT mp.player_id, COUNT(DISTINCT mp.match_id) AS matches_played
+      FROM match_players mp
+      JOIN matches m ON m.id = mp.match_id
+      WHERE ($1::date IS NULL OR m.match_date = $1::date)
+      GROUP BY mp.player_id
+    ),
+    scoped_batting AS (
+      SELECT br.* FROM batting_records br
+      JOIN innings i ON i.id = br.innings_id
+      JOIN matches m ON m.id = i.match_id
+      WHERE ($1::date IS NULL OR m.match_date = $1::date)
     )
     SELECT p.id AS player_id, p.name,
       COALESCE(mc.matches_played, 0) AS matches_played,
@@ -153,12 +166,13 @@ router.get('/leaderboard', async (req, res) => {
         THEN ROUND(wl.wins::numeric / (wl.wins + wl.losses) * 100, 1)
         ELSE 0 END AS win_pct
     FROM players p
-    LEFT JOIN batting_records br ON br.player_id = p.id
+    LEFT JOIN scoped_batting br ON br.player_id = p.id
     LEFT JOIN win_loss wl ON wl.player_id = p.id
     LEFT JOIN match_counts mc ON mc.player_id = p.id
+    WHERE ($1::date IS NULL OR mc.matches_played > 0)
     GROUP BY p.id, p.name, wl.wins, wl.losses, mc.matches_played
     ORDER BY total_runs DESC
-  `);
+  `, [dateParam]);
 
   // overs_bowled is stored in cricket notation (e.g. 3.4 = 3 overs + 4 balls,
   // not a base-10 decimal), so it must be converted to a true balls count
@@ -166,15 +180,24 @@ router.get('/leaderboard', async (req, res) => {
   // the aggregated overs and the economy rate come out wrong.
   const bowlingRes = await pool.query(`
     WITH match_counts AS (
-      SELECT player_id, COUNT(DISTINCT match_id) AS matches_played
-      FROM match_players GROUP BY player_id
+      SELECT mp.player_id, COUNT(DISTINCT mp.match_id) AS matches_played
+      FROM match_players mp
+      JOIN matches m ON m.id = mp.match_id
+      WHERE ($1::date IS NULL OR m.match_date = $1::date)
+      GROUP BY mp.player_id
+    ),
+    scoped_bowling AS (
+      SELECT bwr.* FROM bowling_records bwr
+      JOIN innings i ON i.id = bwr.innings_id
+      JOIN matches m ON m.id = i.match_id
+      WHERE ($1::date IS NULL OR m.match_date = $1::date)
     ),
     bowling_totals AS (
       SELECT player_id,
         SUM(FLOOR(overs_bowled)::int * 6 + ROUND((overs_bowled - FLOOR(overs_bowled)) * 10)::int) AS total_balls,
         SUM(wickets) AS wickets,
         SUM(runs_conceded) AS runs_conceded
-      FROM bowling_records
+      FROM scoped_bowling
       GROUP BY player_id
     )
     SELECT p.id AS player_id, p.name,
@@ -188,9 +211,10 @@ router.get('/leaderboard', async (req, res) => {
     FROM players p
     LEFT JOIN bowling_totals bt ON bt.player_id = p.id
     LEFT JOIN match_counts mc ON mc.player_id = p.id
+    WHERE ($1::date IS NULL OR mc.matches_played > 0)
     GROUP BY p.id, p.name, mc.matches_played, bt.total_balls, bt.wickets, bt.runs_conceded
     ORDER BY wickets DESC, economy ASC
-  `);
+  `, [dateParam]);
 
   res.json({ batting: battingRes.rows, bowling: bowlingRes.rows });
 });

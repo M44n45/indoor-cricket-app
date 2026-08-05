@@ -137,11 +137,14 @@ router.get('/:matchId/current-innings', async (req, res) => {
 // team-assignment state doesn't survive a fresh page/session.
 router.get('/:matchId/players', async (req, res) => {
   const result = await pool.query(
-    'SELECT player_id, team FROM match_players WHERE match_id=$1',
+    `SELECT mp.player_id, mp.team, p.name FROM match_players mp
+     JOIN players p ON p.id = mp.player_id WHERE mp.match_id=$1`,
     [req.params.matchId]
   );
   const aSet = new Set(), bSet = new Set();
+  const names = {};
   for (const row of result.rows) {
+    names[row.player_id] = row.name;
     if (row.team === 'A') aSet.add(row.player_id);
     else if (row.team === 'B') bSet.add(row.player_id);
   }
@@ -149,7 +152,16 @@ router.get('/:matchId/players', async (req, res) => {
   const commonSet = new Set(commonIds);
   const teamAIds = [...aSet].filter(id => !commonSet.has(id));
   const teamBIds = [...bSet].filter(id => !commonSet.has(id));
-  res.json({ team_a_player_ids: teamAIds, team_b_player_ids: teamBIds, common_player_ids: commonIds });
+  // Team rosters for display purposes (e.g. listing both squads on the
+  // watch/scorecard views) — common players appear on both sides since
+  // they actually play for both teams.
+  const byName = (a, b) => a.name.localeCompare(b.name);
+  const teamAPlayers = [...aSet].map(id => ({ id, name: names[id] })).sort(byName);
+  const teamBPlayers = [...bSet].map(id => ({ id, name: names[id] })).sort(byName);
+  res.json({
+    team_a_player_ids: teamAIds, team_b_player_ids: teamBIds, common_player_ids: commonIds,
+    team_a_players: teamAPlayers, team_b_players: teamBPlayers
+  });
 });
 
 router.get('/', async (req, res) => {

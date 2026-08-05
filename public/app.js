@@ -117,7 +117,6 @@ async function showPlayerCard(playerId) {
   if (!res.ok) return;
   const d = await res.json();
   const initial = d.player.name.charAt(0).toUpperCase();
-  const role = d.wickets > 0 && d.total_runs > 100 ? 'All-Rounder' : (d.wickets > 0 ? 'Bowler' : 'Batsman');
 
   const container = document.getElementById('player-card-container');
   container.innerHTML = `
@@ -125,10 +124,7 @@ async function showPlayerCard(playerId) {
       <div class="player-card">
         <div class="player-card-header">
           <div class="player-card-avatar">${initial}</div>
-          <div>
-            <p class="player-card-name">${d.player.name}</p>
-            <p class="player-card-role">${role}</p>
-          </div>
+          <p class="player-card-name">${d.player.name}</p>
         </div>
         <div class="player-card-grid">
           <div class="player-card-stat"><div class="value">${d.matches_played}</div><div class="label">Matches</div></div>
@@ -209,6 +205,7 @@ function backToModeSelect() {
   document.getElementById('score-view').style.display = 'none';
   document.getElementById('leaderboard-view').style.display = 'none';
   document.getElementById('stats-view').style.display = 'none';
+  document.getElementById('scorecard-view').style.display = 'none';
   const aboutView = document.getElementById('about-view');
   if (aboutView) aboutView.style.display = 'none';
   const av = document.getElementById('admin-view');
@@ -364,6 +361,7 @@ function ensureWatchScorecardShell() {
           <span id="watch-first-innings-toggle" onclick="toggleFirstInningsRecap()" style="float:right; text-decoration:underline; cursor:pointer;">View scorecard</span>
         </div>
       </div>
+      <div id="watch-teams-container"></div>
       <div class="card" id="watch-first-innings-recap-card" style="display:none;">
         <h2 id="watch-fi-recap-title">Innings 1</h2>
         <table class="mini-table" id="watch-fi-batting-table"><thead><tr><th>Batsman</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody></tbody></table>
@@ -386,6 +384,55 @@ function ensureWatchScorecardShell() {
   }
   return true;
 }
+function renderTeamsCard(containerId, teamAName, teamBName, teamAPlayers, teamBPlayers) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const bodyId = `${containerId}-roster-body`;
+  const chevronId = `${containerId}-roster-chevron`;
+  // Preserve open/closed state across re-renders (e.g. live polling) instead of
+  // forcing it collapsed again every refresh.
+  const existingBody = document.getElementById(bodyId);
+  const wasExpanded = existingBody ? !existingBody.classList.contains('collapsed') : false;
+  const totalCount = (teamAPlayers.length || 0) + (teamBPlayers.length || 0);
+  const listHtml = (players) => players.length
+    ? `<ul class="team-roster-list">${players.map(p => `<li class="clickable-name" onclick="showPlayerCard(${p.id})">${p.name}</li>`).join('')}</ul>`
+    : '<p class="helper-text">No players listed.</p>';
+  container.innerHTML = `
+    <div class="card">
+      <h2 class="roster-card-header" onclick="toggleRosterCard('${containerId}')">
+        <span>Teams${totalCount ? ` (${totalCount})` : ''}</span>
+        <span id="${chevronId}" class="roster-chevron${wasExpanded ? ' expanded' : ''}">▼</span>
+      </h2>
+      <div id="${bodyId}" class="roster-collapsible${wasExpanded ? '' : ' collapsed'}">
+        <div class="team-roster-columns">
+          <div class="team-roster-col">
+            <h3 class="team-roster-heading">${teamAName || 'Team A'}</h3>
+            ${listHtml(teamAPlayers)}
+          </div>
+          <div class="team-roster-col">
+            <h3 class="team-roster-heading">${teamBName || 'Team B'}</h3>
+            ${listHtml(teamBPlayers)}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function toggleRosterCard(containerId) {
+  const body = document.getElementById(`${containerId}-roster-body`);
+  const chevron = document.getElementById(`${containerId}-roster-chevron`);
+  if (!body) return;
+  const collapsed = body.classList.toggle('collapsed');
+  if (chevron) chevron.classList.toggle('expanded', !collapsed);
+}
+
+async function loadTeamsForMatch(matchId, containerId, teamAName, teamBName) {
+  const res = await fetch(`${API}/matches/${matchId}/players`);
+  if (!res.ok) return;
+  const data = await res.json();
+  renderTeamsCard(containerId, teamAName, teamBName, data.team_a_players || [], data.team_b_players || []);
+}
+
 function renderWatchBallByBall(events) {
   const el = document.getElementById('watch-ball-by-ball');
   if (!el) return;
@@ -403,6 +450,11 @@ async function refreshWatchScorecard() {
   if (!matchRes.ok) return;
   const matchFresh = await matchRes.json();
   state.watchMatch = matchFresh;
+
+  if (state.watchTeamsMatchId !== state.watchMatchId) {
+    state.watchTeamsMatchId = state.watchMatchId;
+    loadTeamsForMatch(state.watchMatchId, 'watch-teams-container', matchFresh.team_a_name, matchFresh.team_b_name);
+  }
 
   const banner = document.getElementById('watch-winner-banner');
   const selectBtn = document.getElementById('watch-select-other-match-btn');
@@ -529,8 +581,7 @@ async function refreshWatchScorecard() {
   if (oversRecapEl) {
     oversRecapEl.innerHTML = oversRecap.slice().reverse().map(over => {
       const pills = over.balls.map(b => {
-        const isBoundary = b.runs === 4 || b.runs === 6;
-        const cls = b.is_wicket ? 'ball-pill wicket' : (isBoundary ? 'ball-pill boundary' : 'ball-pill');
+        const cls = b.is_wicket ? 'ball-pill wicket' : (b.runs === 6 ? 'ball-pill six' : b.runs === 4 ? 'ball-pill four' : 'ball-pill');
         return `<span class="${cls}">${b.display}</span>`;
       }).join('');
       return `
@@ -566,8 +617,7 @@ function renderFirstInningsRecap(fi) {
   }).join('<br>') || '<p class="helper-text">No wickets fell.</p>';
   if (recapEl) recapEl.innerHTML = oversRecap.slice().reverse().map(over => {
     const pills = over.balls.map(b => {
-      const isBoundary = b.runs === 4 || b.runs === 6;
-      const cls = b.is_wicket ? 'ball-pill wicket' : (isBoundary ? 'ball-pill boundary' : 'ball-pill');
+      const cls = b.is_wicket ? 'ball-pill wicket' : (b.runs === 6 ? 'ball-pill six' : b.runs === 4 ? 'ball-pill four' : 'ball-pill');
       return `<span class="${cls}">${b.display}</span>`;
     }).join('');
     return `
@@ -913,6 +963,7 @@ function showView(view, contextMatchId) {
 async function loadMatchListForScorecard(preferredMatchId) {
   const res = await fetch(`${API}/matches`);
   const matches = await res.json();
+  state.scorecardMatches = matches;
   const sel = document.getElementById('scorecard-match-select');
   sel.innerHTML = matches.map(m => `<option value="${m.id}">${m.team_a_name} vs ${m.team_b_name} - ${new Date(m.created_at).toLocaleDateString()}</option>`).join('');
   if (matches.length === 0) return;
@@ -924,6 +975,8 @@ async function loadMatchListForScorecard(preferredMatchId) {
 async function loadFullScorecard() {
   const matchId = document.getElementById('scorecard-match-select').value;
   if (!matchId) return;
+  const matchMeta = (state.scorecardMatches || []).find(m => String(m.id) === String(matchId));
+  loadTeamsForMatch(matchId, 'scorecard-teams-container', matchMeta && matchMeta.team_a_name, matchMeta && matchMeta.team_b_name);
   const res = await fetch(`${API}/matches/${matchId}/full-scorecard`);
   const inningsList = await res.json();
   const container = document.getElementById('scorecard-innings-container');
@@ -939,8 +992,7 @@ async function loadFullScorecard() {
     }).join('');
     const oversRecapHtml = (inn.overs_recap || []).map(over => {
       const pills = over.balls.map(b => {
-        const isBoundary = b.runs === 4 || b.runs === 6;
-        const cls = b.is_wicket ? 'ball-pill wicket' : (isBoundary ? 'ball-pill boundary' : 'ball-pill');
+        const cls = b.is_wicket ? 'ball-pill wicket' : (b.runs === 6 ? 'ball-pill six' : b.runs === 4 ? 'ball-pill four' : 'ball-pill');
         return `<span class="${cls}">${b.display}</span>`;
       }).join('');
       return `
@@ -1919,8 +1971,7 @@ function renderScoreOversRecap(oversRecap) {
   const overs = Array.isArray(oversRecap) ? oversRecap : [];
   el.innerHTML = overs.slice().reverse().map(over => {
     const pills = over.balls.map(b => {
-      const isBoundary = b.runs === 4 || b.runs === 6;
-      const cls = b.is_wicket ? 'ball-pill wicket' : (isBoundary ? 'ball-pill boundary' : 'ball-pill');
+      const cls = b.is_wicket ? 'ball-pill wicket' : (b.runs === 6 ? 'ball-pill six' : b.runs === 4 ? 'ball-pill four' : 'ball-pill');
       return `<span class="${cls}">${b.display}</span>`;
     }).join('');
     return `
@@ -1944,8 +1995,7 @@ async function renderThisOverBalls(innings) {
     return;
   }
   container.innerHTML = balls.map(b => {
-    const isBoundary = b.runs === 4 || b.runs === 6;
-    const cls = b.is_wicket ? 'ball-pill wicket' : (isBoundary ? 'ball-pill boundary' : 'ball-pill');
+    const cls = b.is_wicket ? 'ball-pill wicket' : (b.runs === 6 ? 'ball-pill six' : b.runs === 4 ? 'ball-pill four' : 'ball-pill');
     const label = b.is_wicket ? 'W' : (b.extra_type === 'wide' ? 'Wd' : b.extra_type === 'no_ball' ? 'Nb' : String(b.runs));
     return `<span class="${cls}">${label}</span>`;
   }).join('');

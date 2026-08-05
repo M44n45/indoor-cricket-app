@@ -169,7 +169,7 @@ router.get('/leaderboard', async (req, res) => {
     LEFT JOIN scoped_batting br ON br.player_id = p.id
     LEFT JOIN win_loss wl ON wl.player_id = p.id
     LEFT JOIN match_counts mc ON mc.player_id = p.id
-    WHERE ($1::date IS NULL OR mc.matches_played > 0)
+    WHERE COALESCE(mc.matches_played, 0) > 0
     GROUP BY p.id, p.name, wl.wins, wl.losses, mc.matches_played
     ORDER BY total_runs DESC
   `, [dateParam]);
@@ -211,7 +211,7 @@ router.get('/leaderboard', async (req, res) => {
     FROM players p
     LEFT JOIN bowling_totals bt ON bt.player_id = p.id
     LEFT JOIN match_counts mc ON mc.player_id = p.id
-    WHERE ($1::date IS NULL OR mc.matches_played > 0)
+    WHERE COALESCE(mc.matches_played, 0) > 0
     GROUP BY p.id, p.name, mc.matches_played, bt.total_balls, bt.wickets, bt.runs_conceded
     ORDER BY wickets DESC, economy ASC
   `, [dateParam]);

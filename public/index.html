@@ -63,14 +63,6 @@ body{
 
 /* Swipe roster selector */
 .player-stack{position:relative; height:150px; margin:8px 0;}
-.player-card{
-  position:absolute; inset:0; background:white; border:2px solid var(--border); border-radius:14px;
-  display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:20px; font-weight:600;
-  box-shadow:0 4px 12px rgba(0,0,0,0.1); touch-action:pan-y; user-select:none; transition:transform .25s, opacity .25s;
-}
-.player-card .hint{font-size:12px; color:var(--sub); font-weight:400; margin-top:6px;}
-.player-card.swiping-left{background:#ffe5e5;}
-.player-card.swiping-right{background:#e5f9e9;}
 .swipe-actions{display:flex; justify-content:space-between; margin-top:8px; font-size:12px; color:var(--sub); padding:0 4px;}
 .roster-progress{text-align:center; font-size:13px; color:var(--sub); margin-bottom:6px;}
 .team-chip-row{display:flex; gap:8px; margin-top:10px;}
@@ -204,8 +196,8 @@ body{
   z-index:200; padding:20px;
 }
 .player-card{
-  background:#f5efe3; border-radius:24px; padding:24px; width:100%; max-width:340px;
-  border:6px solid #d9cdb3; box-shadow:0 10px 30px rgba(0,0,0,0.3);
+  background:#f5efe3; border-radius:24px; padding:24px; width:100%; max-width:320px; margin:0 auto;
+  border:6px solid #d9cdb3; box-shadow:0 10px 30px rgba(0,0,0,0.3); box-sizing:border-box;
 }
 .player-card-header{display:flex; align-items:center; gap:14px; margin-bottom:18px;}
 .player-card-avatar{
@@ -213,7 +205,6 @@ body{
   display:flex; align-items:center; justify-content:center; flex-shrink:0;
 }
 .player-card-name{font-size:19px; font-weight:800; color:#1c1c1e; margin:0;}
-.player-card-role{font-size:11px; color:#8a8578; text-transform:uppercase; letter-spacing:0.6px; margin-top:2px;}
 .player-card-grid{display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;}
 .player-card-stat{
   background:#efe6d3; border-radius:14px; padding:12px 6px; text-align:center;
@@ -229,6 +220,10 @@ body{
 }
 .clickable-name{cursor:pointer; text-decoration:underline; text-decoration-color:transparent; transition:text-decoration-color .15s;}
 .clickable-name:active{text-decoration-color:var(--primary);}
+.team-roster-columns{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+.team-roster-heading{font-size:13px; font-weight:700; color:var(--text); margin:0 0 8px; padding-bottom:6px; border-bottom:1px solid var(--border);}
+.team-roster-list{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px;}
+.team-roster-list li{font-size:13.5px; padding:4px 0;}
 .clickable-row{cursor:pointer;}
 .clickable-row:active{background:rgba(30,86,201,0.08);}
 .watch-card-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-top:8px;}
@@ -337,11 +332,18 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
   min-width:30px; height:30px; padding:0 6px; border-radius:8px;
   background:#fff; border:1px solid #ddd; font-weight:700; font-size:13px; color:#333;
 }
-.ball-pill.boundary{background:#7c3aed; border-color:#7c3aed; color:#fff;}
+.ball-pill.four{background:var(--blue); border-color:var(--blue); color:#fff;}
+.ball-pill.six{background:#af52de; border-color:#af52de; color:#fff;}
 .ball-pill.wicket{background:#dc2626; border-color:#dc2626; color:#fff;}
 
 #match-settings-body{overflow:hidden; transition:max-height 0.25s ease;}
 #match-settings-body.collapsed{max-height:0 !important; padding-top:0; margin-top:0;}
+
+.roster-collapsible{overflow:hidden; transition:max-height 0.25s ease; max-height:1000px;}
+.roster-collapsible.collapsed{max-height:0 !important; padding-top:0; margin-top:0;}
+.roster-card-header{cursor:pointer; display:flex; justify-content:space-between; align-items:center;}
+.roster-card-header .roster-chevron{transition:transform .15s; font-size:13px; color:var(--sub);}
+.roster-card-header .roster-chevron.expanded{transform:rotate(180deg);}
 
 .lb-card{border-radius:14px; overflow:hidden; padding-bottom:16px;}
 .lb-card-batting{background:linear-gradient(135deg, #fef9c3 0%, #ffffff 60%); border-left:4px solid #eab308;}
@@ -728,6 +730,7 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
     <h2>Full Scorecard</h2>
     <select id="scorecard-match-select" class="field" onchange="loadFullScorecard()"></select>
   </div>
+  <div id="scorecard-teams-container"></div>
   <div id="scorecard-innings-container"></div>
 </div>
 
@@ -750,7 +753,7 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
   <button onclick="showView('stats')" id="nav-stats"><span class="icon">🗓️</span>History</button>
 </nav>
 
-<script src="app.js?v=80"></script>
+<script src="app.js?v=81"></script>
   <button id="pwa-install-btn" class="pwa-install-btn" style="display:none;" onclick="triggerPwaInstall()">⬇️ Install App</button>
   <button id="floating-admin-gear" class="floating-admin-gear" onclick="enterAdminConsole()" aria-label="Admin Console">⚙️</button>
 </body>

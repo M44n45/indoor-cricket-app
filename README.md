@@ -26,6 +26,8 @@ A modern, iOS-styled mobile web app for scoring indoor cricket with custom rules
 - Strike rate shown as whole numbers throughout
 - Dates shown as plain YYYY-MM-DD, no timestamps
 - Polished iOS-style UI: gradient scoreboard, pill-styled striker/bowler selectors, bottom tab bar, bottom-sheet modals
+- About page (landing screen footer link): what the app is, and a link to the GitHub repo — free to fork/self-host
+- Anonymous usage stats in the admin console: distinct devices active now, plus historic counts (today/7d/30d/all-time + daily breakdown) — no names or accounts, just a random per-browser device ID
 
 ## Stack
 Node.js + Express + PostgreSQL, containerized with Docker Compose. PDF parsing via `pdf-parse`, file uploads via `multer`.
@@ -46,6 +48,7 @@ indoor-cricket-app/
     │   ├── pool.js
     │   └── init.js
     ├── logic/rotation.js
+    ├── logic/usageTracking.js
     └── routes/
         ├── players.js
         ├── matches.js
@@ -129,3 +132,4 @@ docker exec indoor-cricket-db pg_dump -U cricket cricketdb > cricket_backup_$(da
 - `POST /api/leaderboard/upload` — password-protected PDF upload (multipart: file, source_label, admin_password)
 - `GET /api/leaderboard/uploads`, `GET /api/leaderboard/aggregate`
 - `DELETE /api/leaderboard/uploads/:label`, `DELETE /api/leaderboard/all` — password-protected (admin_password query param)
+- `GET /api/admin/usage-stats` — admin-token-protected; distinct-device counts (active now, today, 7d, 30d, all-time, daily breakdown)

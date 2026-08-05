@@ -153,6 +153,22 @@ async function apiFetch(url, opts = {}) {
       // Nothing cached at all — return empty array so the UI renders cleanly
       return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
+    if (url.match(/\/matches\/(-?\d+)\/players$/)) {
+      const cached = await OfflineDB.cacheGet('current_roster');
+      if (cached) return new Response(JSON.stringify(cached), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ team_a_player_ids: [], team_b_player_ids: [], common_player_ids: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.match(/\/matches\/(-?\d+)\/current-innings$/)) {
+      const cached = await OfflineDB.cacheGet('current_innings');
+      if (cached) return new Response(JSON.stringify(cached), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify(null), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.match(/\/matches$/) && method === 'GET') {
+      // Return the cached current match as a one-item list so admin console can show it
+      const cached = await OfflineDB.cacheGet('current_match');
+      if (cached) return new Response(JSON.stringify([cached]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
     if (url.includes('/eligible-batsmen')) {
       const m = url.match(/\/innings\/(-?\d+)\/eligible-batsmen/);
       if (m) {
@@ -1050,8 +1066,26 @@ async function submitAdminLogin() {
 
 
 async function loadAdminConsole() {
-  const res = await fetch(`${API}/matches`);
-  const matches = await res.json();
+  let matches = [];
+  try {
+    const res = await fetch(`${API}/matches`);
+    if (res.ok) {
+      matches = await res.json();
+      // Cache the list so offline resume can find the active match
+      if (window.OfflineDB && matches.length) {
+        const active = matches.find(m => m.status === 'in_progress');
+        if (active) OfflineDB.cacheSet('current_match', active);
+      }
+    } else {
+      throw new Error('not ok');
+    }
+  } catch (_) {
+    // Offline — try to show the cached active match
+    if (window.OfflineDB) {
+      const cached = await OfflineDB.cacheGet('current_match');
+      if (cached) matches = [cached];
+    }
+  }
   const rows = matches.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map(m => {
     const title = m.match_name || `${m.team_a_name} vs ${m.team_b_name}`;
     const canResume = m.status === 'in_progress' || m.status === 'completed' || m.status === 'abandoned';
@@ -1128,10 +1162,16 @@ async function continueScoring(matchId) {
   document.getElementById('mode-select-view').style.display = 'none';
   document.getElementById('main-tabbar').style.display = 'flex';
   document.getElementById('share-watch-btn').style.display = 'block';
-  const matchRes = await fetch(`${API}/matches/${matchId}`);
-  if (matchRes.ok) {
-    const match = await matchRes.json();
+
+  const matchRes = await apiFetch(`${API}/matches/${matchId}`);
+  const match = matchRes.ok ? await matchRes.json() : null;
+  if (match && match.id) {
     state.matchId = match.id;
+    // Persist so a page-refresh-then-offline can still resume
+    if (window.OfflineDB) {
+      OfflineDB.cacheSet('current_match', match);
+      OfflineDB.cacheSet('current_match_id', match.id);
+    }
     state.teamAIds = state.teamAIds || [];
     state.teamBIds = state.teamBIds || [];
     document.getElementById('team-a-name').value = match.team_a_name || document.getElementById('team-a-name').value || 'Team A';
@@ -1139,24 +1179,28 @@ async function continueScoring(matchId) {
     document.getElementById('match-name').value = match.match_name || '';
     document.getElementById('overs-limit').value = match.overs_limit || document.getElementById('overs-limit').value || 10;
     document.getElementById('retirement-overs').value = match.retirement_overs || document.getElementById('retirement-overs').value || 5;
+    state.matchOversLimit = parseFloat(match.overs_limit) || 8;
     await loadPlayers();
-    const rosterRes = await fetch(`${API}/matches/${matchId}/players`);
+    const rosterRes = await apiFetch(`${API}/matches/${matchId}/players`);
     if (rosterRes.ok) {
       const roster = await rosterRes.json();
       state.teamAIds = roster.team_a_player_ids || [];
       state.teamBIds = roster.team_b_player_ids || [];
       state.commonPlayerIds = roster.common_player_ids || [];
       state.attendingIds = new Set([...state.teamAIds, ...state.teamBIds, ...state.commonPlayerIds]);
+      // Cache roster for offline resume
+      if (window.OfflineDB) OfflineDB.cacheSet('current_roster', roster);
       renderAttendanceList();
       renderTeamAssignList();
     }
-    const inningsRes = await fetch(`${API}/matches/${matchId}/current-innings`);
+    const inningsRes = await apiFetch(`${API}/matches/${matchId}/current-innings`);
     if (inningsRes.ok) {
       const innings = await inningsRes.json();
       if (innings && innings.id) {
         state.inningsId = innings.id;
         state.currentBattingTeam = innings.batting_team;
         state.currentBowlingTeamIds = (innings.bowling_team === 'A' ? state.teamAIds : state.teamBIds).concat(state.commonPlayerIds || []);
+        if (window.OfflineDB) OfflineDB.cacheSet('current_innings', innings);
         const battingName = innings.batting_team === 'A' ? (match.team_a_name || 'Team A') : (match.team_b_name || 'Team B');
         document.getElementById('sb-batting-team').innerText = battingName;
         showView('score');
@@ -1605,7 +1649,15 @@ async function createMatch() {
   const match = await res.json();
   state.matchId = match.id;
   // Cache for offline reads (innings start, scorecard, etc.)
-  if (window.OfflineDB) OfflineDB.cacheSet('current_match', match);
+  if (window.OfflineDB) {
+    OfflineDB.cacheSet('current_match', match);
+    OfflineDB.cacheSet('current_match_id', match.id);
+    OfflineDB.cacheSet('current_roster', {
+      team_a_player_ids: state.teamAIds,
+      team_b_player_ids: state.teamBIds,
+      common_player_ids: state.commonPlayerIds || []
+    });
+  }
   document.getElementById('match-status').innerText = `Match created: ${match.team_a_name} vs ${match.team_b_name}`;
   document.getElementById('start-innings-card').style.display = 'block';
   document.getElementById('attendance-assign-section').style.display = 'none';

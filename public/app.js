@@ -31,8 +31,270 @@ let state = {
   swipeQueue: [], swipeIndex: 0, teamAIds: [], teamBIds: [],
   pendingExtraType: null,
   appMode: null, watchPollInterval: null, watchMatchId: null, watchInningsId: null, watchMatch: null,
-  inningsCompletionHandled: false, overCompletedPendingBowlerChoice: null, lastOversCompleted: undefined, matchIsComplete: false
+  inningsCompletionHandled: false, overCompletedPendingBowlerChoice: null, lastOversCompleted: undefined, matchIsComplete: false,
+  isOffline: !navigator.onLine
 };
+
+// ---- Offline coordination layer ----
+// Wraps the scoring-critical API calls so they queue to IndexedDB when the
+// network is down and replay automatically when connectivity is restored.
+// Non-scoring reads (leaderboard, stats, watch) are allowed to fail gracefully.
+
+function updateOfflineBanner() {
+  const offline = document.getElementById('offline-banner');
+  const sync = document.getElementById('sync-banner');
+  if (!offline) return;
+  if (state.isOffline) {
+    offline.style.display = 'block';
+    if (sync) sync.style.display = 'none';
+    refreshOfflineQueueCount();
+  } else {
+    offline.style.display = 'none';
+  }
+}
+
+async function refreshOfflineQueueCount() {
+  if (!window.OfflineDB) return;
+  const q = await OfflineDB.getQueue();
+  const countEl = document.getElementById('offline-queue-count');
+  if (!countEl) return;
+  if (q.length > 0) {
+    countEl.innerText = `${q.length} pending`;
+    countEl.style.display = 'inline';
+  } else {
+    countEl.style.display = 'none';
+  }
+}
+
+async function triggerSync() {
+  if (!window.OfflineDB) return;
+  const q = await OfflineDB.getQueue();
+  if (q.length === 0) return;
+  const syncBanner = document.getElementById('sync-banner');
+  if (syncBanner) syncBanner.style.display = 'block';
+  try {
+    await OfflineDB.syncQueue();
+  } catch (_) {}
+  if (syncBanner) syncBanner.style.display = 'none';
+  refreshOfflineQueueCount();
+  // Refresh the live scorecard after syncing so the server state is displayed
+  if (state.inningsId) {
+    state.inningsCompletionHandled = false;
+    await refreshScorecard(true);
+  }
+}
+
+window.addEventListener('online', async () => {
+  state.isOffline = false;
+  updateOfflineBanner();
+  await triggerSync();
+});
+
+window.addEventListener('offline', () => {
+  state.isOffline = true;
+  updateOfflineBanner();
+});
+
+// Offline-safe version of fetch for scoring mutations:
+// - When online: behaves exactly like fetch, also caches the response for reads
+// - When offline: queues the action and returns a synthetic response from cache
+async function apiFetch(url, opts = {}) {
+  const method = (opts.method || 'GET').toUpperCase();
+  const body = opts.body ? JSON.parse(opts.body) : null;
+
+  // Always try the network first if we're online
+  if (!state.isOffline) {
+    try {
+      const res = await fetch(url, opts);
+      // Opportunistically cache successful GET scorecard responses
+      if (res.ok && method === 'GET' && window.OfflineDB) {
+        const clone = res.clone();
+        clone.json().then(data => {
+          if (url.includes('/scorecard')) {
+            const inningsIdMatch = url.match(/\/innings\/(-?\d+)\/scorecard/);
+            if (inningsIdMatch) OfflineDB.cacheSet(`scorecard_${inningsIdMatch[1]}`, data);
+          }
+          if (url.includes('/players') && !url.includes('/stats')) {
+            OfflineDB.cacheSet('players', data);
+          }
+        }).catch(() => {});
+      }
+      return res;
+    } catch (err) {
+      // Network failure mid-request — fall through to offline handling
+      state.isOffline = true;
+      updateOfflineBanner();
+    }
+  }
+
+  // --- Offline path ---
+  if (!window.OfflineDB) {
+    return new Response(JSON.stringify({ error: 'Offline and no local cache available.' }), { status: 503 });
+  }
+
+  // Reads: serve from cache
+  if (method === 'GET') {
+    if (url.includes('/scorecard')) {
+      const m = url.match(/\/innings\/(-?\d+)\/scorecard/);
+      if (m) {
+        const cached = await OfflineDB.cacheGet(`scorecard_${m[1]}`);
+        if (cached) return new Response(JSON.stringify(cached), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+    }
+    if (url.includes('/players') && !url.includes('/stats')) {
+      // Use in-memory state first (same session), then fall back to IndexedDB cache
+      if (state.players && state.players.length > 0) {
+        return new Response(JSON.stringify(state.players), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      const cached = await OfflineDB.cacheGet('players');
+      if (cached && cached.length > 0) {
+        return new Response(JSON.stringify(cached), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      // Nothing cached at all — return empty array so the UI renders cleanly
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.match(/\/matches\/(-?\d+)\/players$/)) {
+      const cached = await OfflineDB.cacheGet('current_roster');
+      if (cached) return new Response(JSON.stringify(cached), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ team_a_player_ids: [], team_b_player_ids: [], common_player_ids: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.match(/\/matches\/(-?\d+)\/current-innings$/)) {
+      const cached = await OfflineDB.cacheGet('current_innings');
+      if (cached) return new Response(JSON.stringify(cached), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify(null), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.match(/\/matches$/) && method === 'GET') {
+      // Return the cached current match as a one-item list so admin console can show it
+      const cached = await OfflineDB.cacheGet('current_match');
+      if (cached) return new Response(JSON.stringify([cached]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.includes('/eligible-batsmen')) {
+      const m = url.match(/\/innings\/(-?\d+)\/eligible-batsmen/);
+      if (m) {
+        const ids = await OfflineDB.offlineEligibleBatsmen(parseInt(m[1]));
+        return new Response(JSON.stringify({ eligible_player_ids: ids }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+    }
+    if (url.includes('/current-innings')) {
+      const cached = await OfflineDB.cacheGet('current_innings');
+      if (cached) return new Response(JSON.stringify(cached), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.match(/\/matches\/(-?\d+)$/)) {
+      const cached = await OfflineDB.cacheGet('current_match');
+      if (cached) return new Response(JSON.stringify(cached), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    // Fallback for other GETs — return empty/offline error
+    return new Response(JSON.stringify({ error: 'offline' }), { status: 503 });
+  }
+
+  // Mutations: score a ball
+  if (url.match(/\/innings\/(-?\d+)\/ball$/) && method === 'POST') {
+    const m = url.match(/\/innings\/(-?\d+)\/ball$/);
+    const inningsId = parseInt(m[1]);
+    const result = await OfflineDB.offlineScoreBall(inningsId, body);
+    await OfflineDB.enqueue(url, method, body, null);
+    refreshOfflineQueueCount();
+    if (!result) return new Response(JSON.stringify({ error: 'No cached innings data' }), { status: 503 });
+    return new Response(JSON.stringify(result), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // Mutations: retire striker
+  if (url.match(/\/innings\/(-?\d+)\/retire-striker$/) && method === 'POST') {
+    const m = url.match(/\/innings\/(-?\d+)\/retire-striker$/);
+    await OfflineDB.offlineRetireStriker(parseInt(m[1]));
+    await OfflineDB.enqueue(url, method, body, null);
+    refreshOfflineQueueCount();
+    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // Mutations: undo — not supported offline (queue must stay ordered)
+  if (url.match(/\/innings\/(-?\d+)\/undo$/) && method === 'POST') {
+    alert('Undo is not available while offline. It will work once you reconnect.');
+    return new Response(JSON.stringify({ error: 'Undo not available offline' }), { status: 503 });
+  }
+
+  // Mutations: change batsman
+  if (url.match(/\/innings\/(-?\d+)\/change-batsman$/) && method === 'POST') {
+    const m = url.match(/\/innings\/(-?\d+)\/change-batsman$/);
+    await OfflineDB.offlineChangeBatsman(parseInt(m[1]), body.new_striker_id);
+    await OfflineDB.enqueue(url, method, body, null);
+    refreshOfflineQueueCount();
+    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // Mutations: change bowler
+  if (url.match(/\/innings\/(-?\d+)\/change-bowler$/) && method === 'POST') {
+    const m = url.match(/\/innings\/(-?\d+)\/change-bowler$/);
+    await OfflineDB.offlineChangeBowler(parseInt(m[1]), body.new_bowler_id);
+    await OfflineDB.enqueue(url, method, body, null);
+    refreshOfflineQueueCount();
+    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // Mutations: create match
+  if (url.match(/\/matches$/) && method === 'POST') {
+    const tempId = OfflineDB.nextTempId();
+    const syntheticMatch = {
+      id: tempId,
+      match_date: new Date().toISOString().slice(0, 10),
+      team_a_name: body.team_a_name || 'Team A',
+      team_b_name: body.team_b_name || 'Team B',
+      match_name: body.match_name || `${body.team_a_name} vs ${body.team_b_name}`,
+      overs_limit: body.overs_limit || 8,
+      retirement_overs: body.retirement_overs || 2,
+      status: 'setup'
+    };
+    await OfflineDB.cacheSet('current_match', syntheticMatch);
+    await OfflineDB.enqueue(url, method, body, tempId);
+    refreshOfflineQueueCount();
+    return new Response(JSON.stringify(syntheticMatch), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // Mutations: start innings
+  if (url.match(/\/matches\/(-?\d+)\/innings$/) && method === 'POST') {
+    const matchId = parseInt(url.match(/\/matches\/(-?\d+)\/innings$/)[1]);
+    const tempId = OfflineDB.nextTempId();
+    const cachedMatch = await OfflineDB.cacheGet('current_match') || {};
+    const syntheticInnings = {
+      id: tempId,
+      match_id: matchId,
+      innings_no: body.innings_no || 1,
+      batting_team: body.batting_team,
+      bowling_team: body.bowling_team,
+      total_runs: 0, total_wickets: 0, overs_completed: 0, total_legal_balls: 0,
+      wide_runs: 0, no_ball_runs: 0,
+      striker_id: null, bowler_id: null,
+      status: 'in_progress',
+      _overs_limit: cachedMatch.overs_limit || 8
+    };
+    await OfflineDB.cacheSet('current_innings', syntheticInnings);
+    // Build empty scorecard for this innings using current roster
+    const battingTeam = body.batting_team;
+    const battingIds = battingTeam === 'A' ? [...(state.teamAIds || []), ...(state.commonPlayerIds || [])]
+                                           : [...(state.teamBIds || []), ...(state.commonPlayerIds || [])];
+    const bowlingIds = battingTeam === 'A' ? [...(state.teamBIds || []), ...(state.commonPlayerIds || [])]
+                                           : [...(state.teamAIds || []), ...(state.commonPlayerIds || [])];
+    const toPlayer = id => ({ id, name: nameOf(id) });
+    await OfflineDB.offlineInitScorecard(
+      tempId, syntheticInnings,
+      battingIds.map(toPlayer), bowlingIds.map(toPlayer),
+      cachedMatch.overs_limit || 8
+    );
+    await OfflineDB.enqueue(url, method, body, tempId);
+    refreshOfflineQueueCount();
+    return new Response(JSON.stringify(syntheticInnings), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // Mutations: complete innings / match / status — just queue, synthetic OK response
+  if (method === 'POST') {
+    await OfflineDB.enqueue(url, method, body, null);
+    refreshOfflineQueueCount();
+    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  return new Response(JSON.stringify({ error: 'offline' }), { status: 503 });
+}
 
 // overs_bowled from the API is in cricket notation (e.g. 3.4 = 3 overs + 4
 // balls, NOT a base-10 decimal). Dividing runs by that value directly
@@ -79,7 +341,7 @@ async function addPlayer() {
   const name = nameInput.value.trim();
   if (!name) return;
   const isCommon = document.getElementById('is-common').checked;
-  await fetch(`${API}/players`, {
+  await apiFetch(`${API}/players`, {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ name, is_common_player: isCommon })
   });
@@ -87,7 +349,7 @@ async function addPlayer() {
   document.getElementById('is-common').checked = false;
   // Refresh the roster list only - don't touch attendance/team state,
   // otherwise adding a player mid-setup would silently wipe out selections made so far.
-  const res = await fetch(`${API}/players`);
+  const res = await apiFetch(`${API}/players`);
   state.players = await res.json();
   renderAttendanceList();
   renderTeamAssignList();
@@ -95,7 +357,7 @@ async function addPlayer() {
 
 async function undoLastBall() {
   if (!state.inningsId) return;
-  const res = await fetch(`${API}/innings/${state.inningsId}/undo`, { method: 'POST' });
+  const res = await apiFetch(`${API}/innings/${state.inningsId}/undo`, { method: 'POST' });
   const result = await res.json();
   if (result.error) {
     alert(result.error);
@@ -721,9 +983,17 @@ async function checkAdminAuth() {
     loadAdminConsole();
     return;
   }
-  const res = await fetch(`${API}/admin/status`);
-  const data = await res.json();
-  if (data.configured) {
+  let configured = false;
+  try {
+    const res = await fetch(`${API}/admin/status`);
+    const data = await res.json();
+    configured = !!data.configured;
+  } catch (_) {
+    // Offline — can't reach server. Show login form so an existing admin can
+    // still attempt to log in; don't show the setup form as it would just fail.
+    configured = true;
+  }
+  if (configured) {
     renderAdminLoginForm();
   } else {
     renderAdminSetupForm();
@@ -796,8 +1066,26 @@ async function submitAdminLogin() {
 
 
 async function loadAdminConsole() {
-  const res = await fetch(`${API}/matches`);
-  const matches = await res.json();
+  let matches = [];
+  try {
+    const res = await fetch(`${API}/matches`);
+    if (res.ok) {
+      matches = await res.json();
+      // Cache the list so offline resume can find the active match
+      if (window.OfflineDB && matches.length) {
+        const active = matches.find(m => m.status === 'in_progress');
+        if (active) OfflineDB.cacheSet('current_match', active);
+      }
+    } else {
+      throw new Error('not ok');
+    }
+  } catch (_) {
+    // Offline — try to show the cached active match
+    if (window.OfflineDB) {
+      const cached = await OfflineDB.cacheGet('current_match');
+      if (cached) matches = [cached];
+    }
+  }
   const rows = matches.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map(m => {
     const title = m.match_name || `${m.team_a_name} vs ${m.team_b_name}`;
     const canResume = m.status === 'in_progress' || m.status === 'completed' || m.status === 'abandoned';
@@ -874,10 +1162,16 @@ async function continueScoring(matchId) {
   document.getElementById('mode-select-view').style.display = 'none';
   document.getElementById('main-tabbar').style.display = 'flex';
   document.getElementById('share-watch-btn').style.display = 'block';
-  const matchRes = await fetch(`${API}/matches/${matchId}`);
-  if (matchRes.ok) {
-    const match = await matchRes.json();
+
+  const matchRes = await apiFetch(`${API}/matches/${matchId}`);
+  const match = matchRes.ok ? await matchRes.json() : null;
+  if (match && match.id) {
     state.matchId = match.id;
+    // Persist so a page-refresh-then-offline can still resume
+    if (window.OfflineDB) {
+      OfflineDB.cacheSet('current_match', match);
+      OfflineDB.cacheSet('current_match_id', match.id);
+    }
     state.teamAIds = state.teamAIds || [];
     state.teamBIds = state.teamBIds || [];
     document.getElementById('team-a-name').value = match.team_a_name || document.getElementById('team-a-name').value || 'Team A';
@@ -885,27 +1179,30 @@ async function continueScoring(matchId) {
     document.getElementById('match-name').value = match.match_name || '';
     document.getElementById('overs-limit').value = match.overs_limit || document.getElementById('overs-limit').value || 10;
     document.getElementById('retirement-overs').value = match.retirement_overs || document.getElementById('retirement-overs').value || 5;
+    state.matchOversLimit = parseFloat(match.overs_limit) || 8;
     await loadPlayers();
-    const rosterRes = await fetch(`${API}/matches/${matchId}/players`);
+    const rosterRes = await apiFetch(`${API}/matches/${matchId}/players`);
     if (rosterRes.ok) {
       const roster = await rosterRes.json();
       state.teamAIds = roster.team_a_player_ids || [];
       state.teamBIds = roster.team_b_player_ids || [];
       state.commonPlayerIds = roster.common_player_ids || [];
       state.attendingIds = new Set([...state.teamAIds, ...state.teamBIds, ...state.commonPlayerIds]);
+      // Cache roster for offline resume
+      if (window.OfflineDB) OfflineDB.cacheSet('current_roster', roster);
       renderAttendanceList();
       renderTeamAssignList();
     }
-    const inningsRes = await fetch(`${API}/matches/${matchId}/current-innings`);
+    const inningsRes = await apiFetch(`${API}/matches/${matchId}/current-innings`);
     if (inningsRes.ok) {
       const innings = await inningsRes.json();
       if (innings && innings.id) {
         state.inningsId = innings.id;
         state.currentBattingTeam = innings.batting_team;
         state.currentBowlingTeamIds = (innings.bowling_team === 'A' ? state.teamAIds : state.teamBIds).concat(state.commonPlayerIds || []);
+        if (window.OfflineDB) OfflineDB.cacheSet('current_innings', innings);
         const battingName = innings.batting_team === 'A' ? (match.team_a_name || 'Team A') : (match.team_b_name || 'Team B');
         document.getElementById('sb-batting-team').innerText = battingName;
-        document.getElementById('sb-players-count').innerText = `(${innings.batting_team === 'A' ? (state.teamAIds||[]).length : (state.teamBIds||[]).length} players)`;
         showView('score');
         await refreshScorecard(true);
         return;
@@ -1169,8 +1466,14 @@ function openMatchScorecard(matchId) {
 }
 
 async function loadPlayers() {
-  const res = await fetch(`${API}/players`);
-  state.players = await res.json();
+  const res = await apiFetch(`${API}/players`);
+  const data = await res.json();
+  // Only overwrite in-memory players if we got a real array back (not an error object)
+  if (Array.isArray(data)) {
+    state.players = data;
+    if (window.OfflineDB && data.length > 0) OfflineDB.cacheSet('players', data);
+  }
+  // If we're offline and already had players in memory, keep them — don't wipe
   state.attendingIds = new Set();
   state.teamAIds = [];
   state.teamBIds = [];
@@ -1340,11 +1643,21 @@ async function createMatch() {
     document.getElementById('match-status').innerText = 'Assign at least a few players to each team first.';
     return;
   }
-  const res = await fetch(`${API}/matches`, {
+  const res = await apiFetch(`${API}/matches`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
   });
   const match = await res.json();
   state.matchId = match.id;
+  // Cache for offline reads (innings start, scorecard, etc.)
+  if (window.OfflineDB) {
+    OfflineDB.cacheSet('current_match', match);
+    OfflineDB.cacheSet('current_match_id', match.id);
+    OfflineDB.cacheSet('current_roster', {
+      team_a_player_ids: state.teamAIds,
+      team_b_player_ids: state.teamBIds,
+      common_player_ids: state.commonPlayerIds || []
+    });
+  }
   document.getElementById('match-status').innerText = `Match created: ${match.team_a_name} vs ${match.team_b_name}`;
   document.getElementById('start-innings-card').style.display = 'block';
   document.getElementById('attendance-assign-section').style.display = 'none';
@@ -1371,7 +1684,7 @@ async function startInnings(inningsNo = 1) {
   state.matchIsComplete = false;
   unlockScoringControls();
   if (inningsNo === 1) { state.matchTarget = null; state.firstInningsScore = null; state.firstInningsTeamName = null; }
-  const res = await fetch(`${API}/matches/${state.matchId}/innings`, {
+  const res = await apiFetch(`${API}/matches/${state.matchId}/innings`, {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ innings_no: inningsNo, batting_team: battingTeam, bowling_team: bowlingTeam })
   });
@@ -1379,9 +1692,10 @@ async function startInnings(inningsNo = 1) {
   state.inningsId = innings.id;
   state.currentBattingTeam = battingTeam;
   state.currentBowlingTeamIds = (bowlingTeam === 'A' ? state.teamAIds : state.teamBIds).concat(state.commonPlayerIds);
+  // Cache innings for offline reads
+  if (window.OfflineDB) OfflineDB.cacheSet('current_innings', innings);
   document.getElementById('sb-batting-team').innerText = teamName;
-  const battingIdsCount = battingTeam === 'A' ? state.teamAIds.length : state.teamBIds.length;
-  document.getElementById('sb-players-count').innerText = `(${battingIdsCount} players)`;
+  document.getElementById('sb-players-count').innerText = '';
   showView('score');
   await refreshScorecard();
   promptOpeningBatsmanAndBowler(battingTeam);
@@ -1411,10 +1725,10 @@ function promptOpeningBatsmanAndBowler(battingTeam) {
 async function confirmOpeningPlayers() {
   const strikerId = parseInt(document.getElementById('opening-striker-select').value);
   const bowlerId = parseInt(document.getElementById('opening-bowler-select').value);
-  await fetch(`${API}/matches/innings/${state.inningsId}/change-batsman`, {
+  await apiFetch(`${API}/matches/innings/${state.inningsId}/change-batsman`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ new_striker_id: strikerId })
   });
-  await fetch(`${API}/matches/innings/${state.inningsId}/change-bowler`, {
+  await apiFetch(`${API}/matches/innings/${state.inningsId}/change-bowler`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ new_bowler_id: bowlerId })
   });
   closeExtraModal();
@@ -1441,7 +1755,7 @@ function openCompleteMatchModal() {
 }
 
 async function confirmMatchResult(winner) {
-  await fetch(`${API}/matches/${state.matchId}/complete`, {
+  await apiFetch(`${API}/matches/${state.matchId}/complete`, {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ winner_team: winner, result_summary: 'Recorded via scorer UI' })
   });
@@ -1450,7 +1764,7 @@ async function confirmMatchResult(winner) {
 }
 
 async function confirmAbandonMatch() {
-  await fetch(`${API}/matches/${state.matchId}/status`, {
+  await apiFetch(`${API}/matches/${state.matchId}/status`, {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ status: 'abandoned', result_summary: 'Abandoned from scorer UI' })
   });
@@ -1460,7 +1774,7 @@ async function confirmAbandonMatch() {
 
 async function recordMatchResult(winnerTeam) {
   if (!state.matchId) return;
-  await fetch(`${API}/matches/${state.matchId}/complete`, {
+  await apiFetch(`${API}/matches/${state.matchId}/complete`, {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ winner_team: winnerTeam, result_summary: 'Auto-recorded at innings completion' })
   });
@@ -1468,7 +1782,7 @@ async function recordMatchResult(winnerTeam) {
 
 async function scoreBall(runs) {
   if (state.matchIsComplete) return;
-  await fetch(`${API}/innings/${state.inningsId}/ball`, {
+  await apiFetch(`${API}/innings/${state.inningsId}/ball`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ runs })
   });
   refreshScorecard();
@@ -1476,7 +1790,7 @@ async function scoreBall(runs) {
 
 async function scoreWide() {
   if (state.matchIsComplete) return;
-  await fetch(`${API}/innings/${state.inningsId}/ball`, {
+  await apiFetch(`${API}/innings/${state.inningsId}/ball`, {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ runs: 0, extra_type: 'wide', extra_runs: 1 })
   });
@@ -1539,7 +1853,7 @@ async function confirmWicket() {
   const fielderId = fielderSelect && fielderSelect.value ? parseInt(fielderSelect.value) : null;
   const needsFielder = ['caught','run_out','stumped'].includes(state.pendingDismissalType);
   if (needsFielder && !fielderId) return;
-  await fetch(`${API}/innings/${state.inningsId}/ball`, {
+  await apiFetch(`${API}/innings/${state.inningsId}/ball`, {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({
       runs: 0, is_wicket: true, wicket_type: state.pendingDismissalType,
@@ -1562,7 +1876,7 @@ async function promptNextBatsmanThenBowler() {
   const currentBowlerId = state.overCompletedPendingBowlerChoice.currentBowlerId;
   state.overCompletedPendingBowlerChoice = null;
 
-  const eligibleRes = await fetch(`${API}/innings/${state.inningsId}/eligible-batsmen`);
+  const eligibleRes = await apiFetch(`${API}/innings/${state.inningsId}/eligible-batsmen`);
   const eligible = (await eligibleRes.json()).eligible_player_ids;
   const otherOptions = bowlIds.filter(id => id !== currentBowlerId);
   const defaultBowlerId = otherOptions.length > 0 ? otherOptions[0] : currentBowlerId;
@@ -1589,10 +1903,10 @@ async function promptNextBatsmanThenBowler() {
 async function confirmNextBatsmanAndBowler() {
   const strikerId = parseInt(document.getElementById('next-batsman-select').value);
   const bowlerId = parseInt(document.getElementById('next-bowler-select').value);
-  await fetch(`${API}/matches/innings/${state.inningsId}/change-batsman`, {
+  await apiFetch(`${API}/matches/innings/${state.inningsId}/change-batsman`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ new_striker_id: strikerId })
   });
-  await fetch(`${API}/matches/innings/${state.inningsId}/change-bowler`, {
+  await apiFetch(`${API}/matches/innings/${state.inningsId}/change-bowler`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ new_bowler_id: bowlerId })
   });
   closeExtraModal();
@@ -1600,7 +1914,7 @@ async function confirmNextBatsmanAndBowler() {
 }
 
 async function retireBatsman() {
-  await fetch(`${API}/innings/${state.inningsId}/retire-striker`, { method: 'POST' });
+  await apiFetch(`${API}/innings/${state.inningsId}/retire-striker`, { method: 'POST' });
   const inningsEnded = await refreshScorecard(true);
   if (!inningsEnded) {
     if (state.overCompletedPendingBowlerChoice) {
@@ -1612,7 +1926,7 @@ async function retireBatsman() {
 }
 
 async function promptNextBatsman() {
-  const eligibleRes = await fetch(`${API}/innings/${state.inningsId}/eligible-batsmen`);
+  const eligibleRes = await apiFetch(`${API}/innings/${state.inningsId}/eligible-batsmen`);
   const eligible = (await eligibleRes.json()).eligible_player_ids;
   const container = document.getElementById('extra-modal-container');
   container.innerHTML = `
@@ -1629,7 +1943,7 @@ async function promptNextBatsman() {
 
 async function confirmNextBatsman() {
   const newId = parseInt(document.getElementById('next-batsman-select').value);
-  await fetch(`${API}/matches/innings/${state.inningsId}/change-batsman`, {
+  await apiFetch(`${API}/matches/innings/${state.inningsId}/change-batsman`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ new_striker_id: newId })
   });
   closeExtraModal();
@@ -1666,13 +1980,13 @@ async function selectExtraRuns(runs) {
   const type = state.pendingExtraType; // 'wide' or 'no_ball'
   if (type === 'no_ball') {
     // No ball always carries a fixed 1-run penalty; 'runs' here are runs scored off the bat by the batsman.
-    await fetch(`${API}/innings/${state.inningsId}/ball`, {
+    await apiFetch(`${API}/innings/${state.inningsId}/ball`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ runs: runs, extra_type: type, extra_runs: 1 })
     });
   } else {
     const extraRuns = runs === 0 ? 1 : runs;
-    await fetch(`${API}/innings/${state.inningsId}/ball`, {
+    await apiFetch(`${API}/innings/${state.inningsId}/ball`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ runs: 0, extra_type: type, extra_runs: extraRuns })
     });
@@ -1683,7 +1997,7 @@ async function selectExtraRuns(runs) {
 
 async function changeBatsman() {
   const newId = parseInt(document.getElementById('striker-select').value);
-  await fetch(`${API}/matches/innings/${state.inningsId}/change-batsman`, {
+  await apiFetch(`${API}/matches/innings/${state.inningsId}/change-batsman`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ new_striker_id: newId })
   });
   refreshScorecard();
@@ -1691,15 +2005,18 @@ async function changeBatsman() {
 
 async function changeBowler() {
   const newId = parseInt(document.getElementById('bowler-select').value);
-  await fetch(`${API}/matches/innings/${state.inningsId}/change-bowler`, {
+  await apiFetch(`${API}/matches/innings/${state.inningsId}/change-bowler`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ new_bowler_id: newId })
   });
   refreshScorecard();
 }
 
 async function refreshScorecard(skipBowlerPrompt = false) {
-  const res = await fetch(`${API}/innings/${state.inningsId}/scorecard`);
+  const res = await apiFetch(`${API}/innings/${state.inningsId}/scorecard`);
   const data = await res.json();
+  if (data.error) return false;
+  // Cache fresh scorecard for offline use
+  if (window.OfflineDB && !state.isOffline) OfflineDB.cacheSet(`scorecard_${state.inningsId}`, data);
 
   const prevOvers = state.lastOversCompleted;
   const newOvers = parseFloat(data.innings.overs_completed);
@@ -1764,7 +2081,7 @@ async function refreshScorecard(skipBowlerPrompt = false) {
     return `<tr><td class="clickable-name" onclick="showPlayerCard(${b.player_id})">${b.name}</td><td>${b.overs_bowled}</td><td>${b.maidens || 0}</td><td>${b.runs_conceded}</td><td>${b.wickets}</td><td>${b.wides || 0}</td><td>${b.no_balls || 0}</td><td>${econ}</td></tr>`;
   }).join('');
 
-  const eligibleRes = await fetch(`${API}/innings/${state.inningsId}/eligible-batsmen`);
+  const eligibleRes = await apiFetch(`${API}/innings/${state.inningsId}/eligible-batsmen`);
   const eligible = (await eligibleRes.json()).eligible_player_ids;
   const commonIds = state.commonPlayerIds || [];
   const currentBowlerId = data.innings.bowler_id;
@@ -1799,13 +2116,13 @@ async function refreshScorecard(skipBowlerPrompt = false) {
 async function checkInningsCompletion(data) {
   if (state.inningsCompletionHandled) return true;
 
-  const matchRes = await fetch(`${API}/matches/${state.matchId}`);
+  const matchRes = await apiFetch(`${API}/matches/${state.matchId}`);
   const match = await matchRes.json();
   const oversLimit = parseFloat(match.overs_limit);
   const oversDone = parseFloat(data.innings.overs_completed);
   state.matchOversLimit = oversLimit;
 
-  const eligibleRes = await fetch(`${API}/innings/${state.inningsId}/eligible-batsmen`);
+  const eligibleRes = await apiFetch(`${API}/innings/${state.inningsId}/eligible-batsmen`);
   const eligible = (await eligibleRes.json()).eligible_player_ids;
   const allOut = eligible.length <= 0;
   const oversFinished = oversDone >= oversLimit;
@@ -1930,7 +2247,7 @@ function showInningsCompleteModal(reason) {
 }
 
 async function startNextInnings() {
-  await fetch(`${API}/matches/innings/${state.inningsId}/complete`, { method: 'POST' });
+  await apiFetch(`${API}/matches/innings/${state.inningsId}/complete`, { method: 'POST' });
   closeExtraModal();
   const nextBattingTeam = state.currentBattingTeam === 'A' ? 'B' : 'A';
   state.inningsCompletionHandled = false;
@@ -1958,7 +2275,7 @@ function promptNextBowler(bowlIds, currentBowlerId) {
 
 async function confirmNextBowler() {
   const newId = parseInt(document.getElementById('next-bowler-select').value);
-  await fetch(`${API}/matches/innings/${state.inningsId}/change-bowler`, {
+  await apiFetch(`${API}/matches/innings/${state.inningsId}/change-bowler`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ new_bowler_id: newId })
   });
   closeExtraModal();
@@ -1988,8 +2305,19 @@ function renderScoreOversRecap(oversRecap) {
 async function renderThisOverBalls(innings) {
   const oversInt = Math.floor(innings.overs_completed);
   const container = document.getElementById('this-over-balls');
-  const res = await fetch(`${API}/innings/${state.inningsId}/over/${oversInt}/balls`);
-  const balls = await res.json();
+  // When offline, derive this-over pills from the cached overs_recap rather
+  // than making a separate network call that will fail.
+  let balls;
+  if (state.isOffline && window.OfflineDB) {
+    const sc = await OfflineDB.cacheGet(`scorecard_${state.inningsId}`);
+    const overEntry = sc && sc.overs_recap ? sc.overs_recap.find(o => o.over_no === oversInt) : null;
+    balls = overEntry ? overEntry.balls.map((b, i) => ({
+      id: i, runs: b.runs, extra_type: b.extra_type, is_wicket: b.is_wicket
+    })) : [];
+  } else {
+    const res = await fetch(`${API}/innings/${state.inningsId}/over/${oversInt}/balls`);
+    balls = await res.json();
+  }
   if (balls.length === 0) {
     container.innerHTML = `<span style="font-size:12px; color:var(--sub);">Over ${oversInt + 1} — no balls yet</span>`;
     return;
@@ -2017,6 +2345,10 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch((err) => {
       console.warn('Service worker registration failed:', err);
     });
+    // Show offline banner immediately if starting without a network
+    updateOfflineBanner();
+    // If we came back online while the app was closed, drain the queue now
+    if (navigator.onLine) triggerSync();
   });
 }
 

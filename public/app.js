@@ -142,8 +142,16 @@ async function apiFetch(url, opts = {}) {
       }
     }
     if (url.includes('/players') && !url.includes('/stats')) {
+      // Use in-memory state first (same session), then fall back to IndexedDB cache
+      if (state.players && state.players.length > 0) {
+        return new Response(JSON.stringify(state.players), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
       const cached = await OfflineDB.cacheGet('players');
-      if (cached) return new Response(JSON.stringify(cached), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (cached && cached.length > 0) {
+        return new Response(JSON.stringify(cached), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      // Nothing cached at all — return empty array so the UI renders cleanly
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
     if (url.includes('/eligible-batsmen')) {
       const m = url.match(/\/innings\/(-?\d+)\/eligible-batsmen/);
@@ -1408,9 +1416,13 @@ function openMatchScorecard(matchId) {
 
 async function loadPlayers() {
   const res = await apiFetch(`${API}/players`);
-  state.players = await res.json();
-  // Cache for offline use
-  if (window.OfflineDB) OfflineDB.cacheSet('players', state.players);
+  const data = await res.json();
+  // Only overwrite in-memory players if we got a real array back (not an error object)
+  if (Array.isArray(data)) {
+    state.players = data;
+    if (window.OfflineDB && data.length > 0) OfflineDB.cacheSet('players', data);
+  }
+  // If we're offline and already had players in memory, keep them — don't wipe
   state.attendingIds = new Set();
   state.teamAIds = [];
   state.teamBIds = [];

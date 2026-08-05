@@ -460,3 +460,24 @@ ever happens — this is a property of the free DB plan, not something this
 feature can work around.
 
 Bumped: app.js cache-busting query string to ?v=80, sw.js CACHE_NAME to v17.
+
+v0.98 UPDATE (Don't ship the real roster to GitHub)
+=============
+seed_players.sql (the actual player names) is now gitignored, so pushing
+this repo to GitHub won't carry a specific group's roster along with it.
+
+- .gitignore: added src/db/seed_players.sql
+- Added src/db/seed_players.example.sql — a template with placeholder names
+  and instructions (copy to seed_players.sql, edit, rebuild) for anyone who
+  wants pre-seeded data on their own deploy.
+- src/db/init.js: now checks whether seed_players.sql exists before reading
+  it. If present (a real deployment with the real file, e.g. this one),
+  behavior is unchanged — seeds on first boot as before. If absent (a fresh
+  GitHub clone), it logs a note and starts with an empty roster instead of
+  throwing — players can always be added via the Setup screen.
+- No Docker/build changes needed: `COPY . .` in the Dockerfile copies
+  whatever's in the local build context regardless of .gitignore, so this
+  deployment's local seed_players.sql keeps working exactly as before.
+  Only `git push` stops carrying it.
+
+No public/ files touched this pass, so no cache-busting version bump needed.

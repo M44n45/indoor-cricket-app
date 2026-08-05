@@ -18,9 +18,19 @@ async function initDb() {
 
   const countRes = await pool.query('SELECT COUNT(*) FROM players');
   if (parseInt(countRes.rows[0].count) === 0) {
-    const seed = fs.readFileSync(path.join(__dirname, 'seed_players.sql'), 'utf8');
-    await pool.query(seed);
-    console.log('Seeded initial player roster.');
+    // seed_players.sql is gitignored on purpose — it holds one specific
+    // group's real names, so a fresh clone of this repo shouldn't ship with
+    // someone else's roster baked in. See seed_players.example.sql for how
+    // to set up your own. No file present just means "start empty";
+    // players can always be added later from the Setup screen.
+    const seedPath = path.join(__dirname, 'seed_players.sql');
+    if (fs.existsSync(seedPath)) {
+      const seed = fs.readFileSync(seedPath, 'utf8');
+      await pool.query(seed);
+      console.log('Seeded initial player roster.');
+    } else {
+      console.log('No seed_players.sql found — starting with an empty roster (add players via Setup, or see seed_players.example.sql).');
+    }
   }
   console.log('Database schema applied.');
 }

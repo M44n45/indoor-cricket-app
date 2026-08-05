@@ -44,7 +44,8 @@ indoor-cricket-app/
     ├── server.js
     ├── db/
     │   ├── schema.sql
-    │   ├── seed_players.sql
+    │   ├── seed_players.sql          (gitignored — your real roster, not committed)
+    │   ├── seed_players.example.sql  (template — copy to seed_players.sql to use)
     │   ├── pool.js
     │   └── init.js
     ├── logic/rotation.js
@@ -58,9 +59,11 @@ indoor-cricket-app/
 ```
 
 ## Pre-loaded roster
-Seeded automatically on first boot: Abhinav, Robin, Maanas, Varun, Prateek, Kailas, Arshad,
-Hrushikesh, Sameer, Kapil, Vaibhav, Bijon, Tushit, Jitesh, Amit, Sundeep, Chinmay, Anuj,
-Anshu, Saurabh, Rahul, Cecil. Add more anytime via Setup.
+Player names aren't hardcoded into the app — `src/db/seed_players.sql` is gitignored, so a
+fresh clone of this repo boots with an empty roster rather than someone else's friend group.
+To pre-seed your own: copy `src/db/seed_players.example.sql` to `src/db/seed_players.sql`,
+edit in your own names, then (re)build. Or skip it entirely and add players anytime via Setup
+in the app itself.
 
 ## Deploy on your Proxmox VM
 

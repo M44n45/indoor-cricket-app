@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS ball_events (
   extra_runs INT DEFAULT 0,
   is_wicket BOOLEAN DEFAULT FALSE,
   wicket_type TEXT,
+  fielder_id INT REFERENCES players(id),
   created_at TIMESTAMP DEFAULT NOW()
 );
 

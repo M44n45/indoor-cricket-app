@@ -116,9 +116,9 @@ router.post('/innings/:inningsId/ball', async (req, res) => {
     const ballNo = isLegalBall ? (prevTotalBalls % 6) + 1 : (prevTotalBalls % 6);
 
     await client.query(
-      `INSERT INTO ball_events (innings_id, over_no, ball_no, batsman_id, bowler_id, runs, extra_type, extra_runs, is_wicket, wicket_type)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [inningsId, oversInt, ballNo, innings.striker_id, innings.bowler_id, runs, extra_type, extra_runs, is_wicket, wicket_type]
+      `INSERT INTO ball_events (innings_id, over_no, ball_no, batsman_id, bowler_id, runs, extra_type, extra_runs, is_wicket, wicket_type, fielder_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [inningsId, oversInt, ballNo, innings.striker_id, innings.bowler_id, runs, extra_type, extra_runs, is_wicket, wicket_type, is_wicket ? fielder_id : null]
     );
 
     const totalRunsThisBall = runs + extra_runs;
@@ -283,7 +283,13 @@ router.get('/innings/:inningsId/scorecard', async (req, res) => {
     no_balls: bowlerExtras[b.player_id]?.no_balls || 0
   }));
   const fow = await pool.query(
-    `SELECT fow.*, p.name FROM fall_of_wickets fow JOIN players p ON p.id = fow.player_id
+    `SELECT fow.*, p.name,
+       br.dismissal_type, bowler.name AS bowler_name, fielder.name AS fielder_name
+     FROM fall_of_wickets fow
+     JOIN players p ON p.id = fow.player_id
+     LEFT JOIN batting_records br ON br.innings_id = fow.innings_id AND br.player_id = fow.player_id
+     LEFT JOIN players bowler ON bowler.id = br.bowler_id
+     LEFT JOIN players fielder ON fielder.id = br.fielder_id
      WHERE fow.innings_id=$1 ORDER BY fow.wicket_no`,
     [inningsId]
   );
@@ -299,11 +305,53 @@ router.get('/innings/:inningsId/scorecard', async (req, res) => {
     );
     if (firstInningsRes.rows.length > 0) {
       const fi = firstInningsRes.rows[0];
+      // Pull the full first-innings detail too (not just the score), so the
+      // live/watch view can still show its batting/bowling stats and ball-by-ball
+      // recap after the second innings starts, instead of losing them entirely.
+      const fiBatting = await pool.query(
+        `SELECT br.*, p.name, bowler.name AS bowler_name, fielder.name AS fielder_name
+         FROM batting_records br
+         JOIN players p ON p.id = br.player_id
+         LEFT JOIN players bowler ON bowler.id = br.bowler_id
+         LEFT JOIN players fielder ON fielder.id = br.fielder_id
+         WHERE br.innings_id=$1 ORDER BY br.batting_order NULLS LAST`,
+        [fi.id]
+      );
+      const fiBowling = await pool.query(
+        `SELECT bwr.*, p.name FROM bowling_records bwr JOIN players p ON p.id = bwr.player_id
+         WHERE bwr.innings_id=$1`,
+        [fi.id]
+      );
+      const fiBowlerExtras = await computeBowlerExtras(fi.id);
+      const fiBowlingWithExtras = fiBowling.rows.map(b => ({
+        ...b,
+        maidens: fiBowlerExtras[b.player_id]?.maidens || 0,
+        wides: fiBowlerExtras[b.player_id]?.wides || 0,
+        no_balls: fiBowlerExtras[b.player_id]?.no_balls || 0
+      }));
+      const fiFow = await pool.query(
+        `SELECT fow.*, p.name,
+           br.dismissal_type, bowler.name AS bowler_name, fielder.name AS fielder_name
+         FROM fall_of_wickets fow
+         JOIN players p ON p.id = fow.player_id
+         LEFT JOIN batting_records br ON br.innings_id = fow.innings_id AND br.player_id = fow.player_id
+         LEFT JOIN players bowler ON bowler.id = br.bowler_id
+         LEFT JOIN players fielder ON fielder.id = br.fielder_id
+         WHERE fow.innings_id=$1 ORDER BY fow.wicket_no`,
+        [fi.id]
+      );
+      const fiOversRecap = await computeOversRecap(fi.id);
       firstInnings = {
         total_runs: fi.total_runs,
         total_wickets: fi.total_wickets,
+        overs_completed: fi.overs_completed,
+        batting_team: fi.batting_team,
         team_name: fi.batting_team === 'A' ? fi.team_a_name : fi.team_b_name,
-        target: fi.total_runs + 1
+        target: fi.total_runs + 1,
+        batting: fiBatting.rows,
+        bowling: fiBowlingWithExtras,
+        fall_of_wickets: fiFow.rows,
+        overs_recap: fiOversRecap
       };
     }
   }
@@ -441,7 +489,7 @@ async function replayInnings(client, inningsId) {
       await client.query(
         `UPDATE batting_records SET status='out', dismissal_type=$1, bowler_id=$2, fielder_id=$3
          WHERE innings_id=$4 AND player_id=$5`,
-        [ball.wicket_type, ball.bowler_id, null, inningsId, ball.batsman_id]
+        [ball.wicket_type, ball.bowler_id, ball.fielder_id, inningsId, ball.batsman_id]
       );
       await client.query(
         `UPDATE bowling_records SET wickets = wickets + 1 WHERE innings_id=$1 AND player_id=$2`,

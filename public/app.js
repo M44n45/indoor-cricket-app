@@ -23,6 +23,20 @@ function calcEconomy(runsConceded, cricketOvers) {
   return overs > 0 ? (runsConceded / overs).toFixed(2) : '0.00';
 }
 
+// Formats a fall-of-wickets / dismissal entry (expects dismissal_type,
+// bowler_name, fielder_name fields, e.g. from the /scorecard fall_of_wickets rows)
+// into standard cricket notation: "b Robin", "c Sameer b Robin", "st Sameer b Robin",
+// "run out (Sameer)".
+function formatDismissal(f) {
+  const type = f.dismissal_type;
+  if (!type) return '';
+  if (type === 'caught') return `c ${f.fielder_name || 'sub'} b ${f.bowler_name || 'unknown'}`;
+  if (type === 'stumped') return `st ${f.fielder_name || 'sub'} b ${f.bowler_name || 'unknown'}`;
+  if (type === 'run_out') return `run out${f.fielder_name ? ' (' + f.fielder_name + ')' : ''}`;
+  if (type === 'bowled') return `b ${f.bowler_name || 'unknown'}`;
+  return f.bowler_name ? `b ${f.bowler_name}` : type;
+}
+
 
 function updateTeamCountChips() {
   const a = document.getElementById('team-a-count-chip');
@@ -30,7 +44,7 @@ function updateTeamCountChips() {
   const c = document.getElementById('common-count-chip');
   if (a) a.innerText = `Team A: ${state.teamAIds.length}`;
   if (b) b.innerText = `Team B: ${state.teamBIds.length}`;
-  if (c) c.innerText = `Common Player: ${state.commonPlayerIds.length}`;
+  if (c) c.innerText = `Common: ${state.commonPlayerIds.length}`;
 }
 
 async function addPlayer() {
@@ -44,7 +58,12 @@ async function addPlayer() {
   });
   nameInput.value = '';
   document.getElementById('is-common').checked = false;
-  await loadPlayers();
+  // Refresh the roster list only - don't touch attendance/team state,
+  // otherwise adding a player mid-setup would silently wipe out selections made so far.
+  const res = await fetch(`${API}/players`);
+  state.players = await res.json();
+  renderAttendanceList();
+  renderTeamAssignList();
 }
 
 async function undoLastBall() {
@@ -189,6 +208,17 @@ async function promptWatchMatchSelection() {
         score = `${runs}/${wkts}`;
         overs = `${ov} ov`;
         liveLine = innings.innings_no === 2 ? 'Chase in progress' : 'Live score';
+        if (innings.innings_no === 2 && innings.id) {
+          try {
+            const scRes = await fetch(`${API}/innings/${innings.id}/scorecard`);
+            const scData = scRes.ok ? await scRes.json() : null;
+            const target = scData && scData.first_innings ? scData.first_innings.target : null;
+            if (target != null) {
+              const needRuns = Math.max(target - runs, 0);
+              liveLine = `Target ${target} &middot; Need ${needRuns}`;
+            }
+          } catch (e) {}
+        }
       }
     } catch (e) {}
     const title = m.match_name || `${m.team_a_name} vs ${m.team_b_name}`;
@@ -263,7 +293,7 @@ function startWatchPolling() {
 function ensureWatchScorecardShell() {
   const view = document.getElementById('watch-view');
   if (!view) return false;
-  const required = ['watch-select-other-match-btn','watch-batting-team','watch-overs-limit','watch-score','watch-overs','watch-crr','watch-striker-name','watch-striker-stats','watch-bowler-name','watch-bowler-stats','watch-this-over-balls','watch-overs-recap','watch-batting-table','watch-bowling-table'];
+  const required = ['watch-select-other-match-btn','watch-batting-team','watch-overs-limit','watch-score','watch-overs','watch-crr','watch-striker-name','watch-striker-stats','watch-bowler-name','watch-bowler-stats','watch-this-over-balls','watch-overs-recap','watch-batting-table','watch-bowling-table','watch-first-innings-recap-card'];
   const existing = required.every(id => document.getElementById(id));
   if (!existing) {
     view.innerHTML = `
@@ -286,12 +316,23 @@ function ensureWatchScorecardShell() {
         </div>
         <div class="first-innings-row" id="watch-first-innings-row" style="display:none; margin-top:6px; font-size:12.5px; opacity:0.85;">
           <span id="watch-first-innings-label">Team A</span>: <span id="watch-first-innings-score">0/0</span>
+          <span id="watch-first-innings-toggle" onclick="toggleFirstInningsRecap()" style="float:right; text-decoration:underline; cursor:pointer;">View scorecard</span>
         </div>
+      </div>
+      <div class="card" id="watch-first-innings-recap-card" style="display:none;">
+        <h2 id="watch-fi-recap-title">Innings 1</h2>
+        <table class="mini-table" id="watch-fi-batting-table"><thead><tr><th>Batsman</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody></tbody></table>
+        <h3 style="margin-top:10px; font-size:13px; color:var(--sub);">Bowling</h3>
+        <table class="mini-table" id="watch-fi-bowling-table"><thead><tr><th>Bowler</th><th>Ov</th><th>M</th><th>R</th><th>W</th><th>Wd</th><th>Nb</th><th>Econ</th></tr></thead><tbody></tbody></table>
+        <h3 style="margin-top:10px; font-size:13px; color:var(--sub);">Fall of Wickets</h3>
+        <div id="watch-fi-fow" style="font-size:12px; color:var(--sub); line-height:1.6;"></div>
+        <h3 style="margin-top:10px; font-size:13px; color:var(--sub);">Ball by Ball Recap</h3>
+        <div class="over-recap-container" id="watch-fi-overs-recap"></div>
       </div>
       <div class="card"><h2>This Over</h2><div class="balls-row" id="watch-this-over-balls"></div></div>
       <div class="card"><h2>Ball by Ball Recap</h2><div class="over-recap-container" id="watch-overs-recap"></div></div>
       <div class="card"><h2>Batting</h2><table id="watch-batting-table"><thead><tr><th>Batsman</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody></tbody></table></div>
-      <div class="card"><h2>Bowling</h2><table id="watch-bowling-table"><thead><tr><th>Bowler</th><th>O</th><th>R</th><th>W</th></tr></thead><tbody></tbody></table></div>
+      <div class="card"><h2>Bowling</h2><table id="watch-bowling-table"><thead><tr><th>Bowler</th><th>Ov</th><th>M</th><th>R</th><th>W</th><th>Wd</th><th>Nb</th><th>Econ</th></tr></thead><tbody></tbody></table></div>
       <div class="card"><h2>Fall of Wickets</h2><div id="watch-fow" style="font-size:12px; color:var(--sub); line-height:1.6;"></div></div>
       <div class="card" id="watch-back-to-list-card" style="display:none; text-align:center;">
         <button class="btn btn-primary btn-full" onclick="backToWatchMatchList()">Watch Another Match</button>
@@ -417,16 +458,29 @@ async function refreshWatchScorecard() {
     if (needRunsEl) needRunsEl.innerText = String(needRuns);
     if (needBallsEl) needBallsEl.innerText = String(ballsLeft);
     if (rrrEl) rrrEl.innerText = ballsLeft > 0 ? (needRuns / (ballsLeft / 6)).toFixed(2) : '0.00';
+    // Full first-innings stats/recap stay accessible via the "View scorecard"
+    // toggle instead of disappearing once the second innings starts.
+    state.watchFirstInnings = fi;
+    renderFirstInningsRecap(fi);
   } else {
     if (firstInningsRow) firstInningsRow.style.display = 'none';
     if (targetRow) targetRow.style.display = 'none';
+    state.watchFirstInnings = null;
+    const recapCard = document.getElementById('watch-first-innings-recap-card');
+    if (recapCard) recapCard.style.display = 'none';
   }
 
   const latestOver = oversRecap.length > 0 ? oversRecap[oversRecap.length - 1] : null;
   if (thisOverEl) thisOverEl.innerHTML = (latestOver ? latestOver.balls : []).map(b => `<div class="ball-chip">${b.display}</div>`).join('') || '<p class="helper-text">No balls recorded yet.</p>';
   if (battingBody) battingBody.innerHTML = batting.map(p => `<tr><td>${p.name}</td><td>${p.runs}</td><td>${p.balls_faced}</td><td>${p.fours}</td><td>${p.sixes}</td><td>${p.balls_faced > 0 ? ((p.runs / p.balls_faced) * 100).toFixed(1) : '0.0'}</td></tr>`).join('') || '<tr><td colspan="6">No batting data</td></tr>';
-  if (bowlingBody) bowlingBody.innerHTML = bowling.map(p => `<tr><td>${p.name}</td><td>${p.overs_bowled}</td><td>${p.runs_conceded}</td><td>${p.wickets}</td></tr>`).join('') || '<tr><td colspan="4">No bowling data</td></tr>';
-  if (fowEl) fowEl.innerHTML = fow.map(f => `${f.wicket_no ?? ''}-${f.team_score_at_fall ?? ''} (${f.name || 'unknown'}, ${f.over_at_fall != null ? Number(f.over_at_fall).toFixed(1) : '0.0'} ov)`).join('<br>') || '<p class="helper-text">No wickets yet.</p>';
+  if (bowlingBody) bowlingBody.innerHTML = bowling.map(p => {
+    const econ = calcEconomy(p.runs_conceded, p.overs_bowled);
+    return `<tr><td>${p.name}</td><td>${p.overs_bowled}</td><td>${p.maidens || 0}</td><td>${p.runs_conceded}</td><td>${p.wickets}</td><td>${p.wides || 0}</td><td>${p.no_balls || 0}</td><td>${econ}</td></tr>`;
+  }).join('') || '<tr><td colspan="8">No bowling data</td></tr>';
+  if (fowEl) fowEl.innerHTML = fow.map(f => {
+    const dismissal = formatDismissal(f);
+    return `${f.wicket_no ?? ''}-${f.team_score_at_fall ?? ''} (${f.name || 'unknown'}${dismissal ? ', ' + dismissal : ''}, ${f.over_at_fall != null ? Number(f.over_at_fall).toFixed(1) : '0.0'} ov)`;
+  }).join('<br>') || '<p class="helper-text">No wickets yet.</p>';
   if (oversRecapEl) {
     oversRecapEl.innerHTML = oversRecap.slice().reverse().map(over => {
       const pills = over.balls.map(b => {
@@ -445,6 +499,53 @@ async function refreshWatchScorecard() {
     }).join('') || '<p class="helper-text">No balls recorded yet.</p>';
   }
 }
+function renderFirstInningsRecap(fi) {
+  const titleEl = document.getElementById('watch-fi-recap-title');
+  const battingBody = document.querySelector('#watch-fi-batting-table tbody');
+  const bowlingBody = document.querySelector('#watch-fi-bowling-table tbody');
+  const fowEl = document.getElementById('watch-fi-fow');
+  const recapEl = document.getElementById('watch-fi-overs-recap');
+  if (titleEl) titleEl.innerText = `Innings 1 — ${fi.team_name || 'Team'} (${fi.total_runs ?? 0}/${fi.total_wickets ?? 0})`;
+  const batting = Array.isArray(fi.batting) ? fi.batting : [];
+  const bowling = Array.isArray(fi.bowling) ? fi.bowling : [];
+  const fow = Array.isArray(fi.fall_of_wickets) ? fi.fall_of_wickets : [];
+  const oversRecap = Array.isArray(fi.overs_recap) ? fi.overs_recap : [];
+  if (battingBody) battingBody.innerHTML = batting.map(p => `<tr><td>${p.name}${p.status==='retired' ? ' (ret)' : p.status==='out' ? ' (out)' : ''}</td><td>${p.runs}</td><td>${p.balls_faced}</td><td>${p.fours}</td><td>${p.sixes}</td><td>${p.balls_faced > 0 ? ((p.runs / p.balls_faced) * 100).toFixed(1) : '0.0'}</td></tr>`).join('') || '<tr><td colspan="6">No batting data</td></tr>';
+  if (bowlingBody) bowlingBody.innerHTML = bowling.map(p => {
+    const econ = calcEconomy(p.runs_conceded, p.overs_bowled);
+    return `<tr><td>${p.name}</td><td>${p.overs_bowled}</td><td>${p.maidens || 0}</td><td>${p.runs_conceded}</td><td>${p.wickets}</td><td>${p.wides || 0}</td><td>${p.no_balls || 0}</td><td>${econ}</td></tr>`;
+  }).join('') || '<tr><td colspan="8">No bowling data</td></tr>';
+  if (fowEl) fowEl.innerHTML = fow.map(f => {
+    const dismissal = formatDismissal(f);
+    return `${f.wicket_no ?? ''}-${f.team_score_at_fall ?? ''} (${f.name || 'unknown'}${dismissal ? ', ' + dismissal : ''}, ${f.over_at_fall != null ? Number(f.over_at_fall).toFixed(1) : '0.0'} ov)`;
+  }).join('<br>') || '<p class="helper-text">No wickets fell.</p>';
+  if (recapEl) recapEl.innerHTML = oversRecap.slice().reverse().map(over => {
+    const pills = over.balls.map(b => {
+      const isBoundary = b.runs === 4 || b.runs === 6;
+      const cls = b.is_wicket ? 'ball-pill wicket' : (isBoundary ? 'ball-pill boundary' : 'ball-pill');
+      return `<span class="${cls}">${b.display}</span>`;
+    }).join('');
+    return `
+      <div class="over-recap-row">
+        <div class="over-recap-header">
+          <span>Over ${over.over_no + 1} — <b>${over.bowler_name}</b> to ${over.batsman_name}</span>
+          <span class="over-recap-total">${over.runs} Runs, ${over.wickets} Wkt</span>
+        </div>
+        <div class="over-recap-balls">${pills}</div>
+      </div>`;
+  }).join('') || '<p class="helper-text">No balls recorded.</p>';
+}
+
+function toggleFirstInningsRecap() {
+  const card = document.getElementById('watch-first-innings-recap-card');
+  const toggle = document.getElementById('watch-first-innings-toggle');
+  if (!card) return;
+  const showing = card.style.display !== 'none';
+  card.style.display = showing ? 'none' : 'block';
+  if (toggle) toggle.innerText = showing ? 'View scorecard' : 'Hide scorecard';
+  if (!showing && state.watchFirstInnings) renderFirstInningsRecap(state.watchFirstInnings);
+}
+
 function backToWatchMatchList() {
   state.watchMatchId = null;
   state.watchInningsId = null;
@@ -657,7 +758,7 @@ async function continueScoring(matchId) {
       state.commonPlayerIds = roster.common_player_ids || [];
       state.attendingIds = new Set([...state.teamAIds, ...state.teamBIds, ...state.commonPlayerIds]);
       renderAttendanceList();
-      renderAssignTapList();
+      renderTeamAssignList();
     }
     const inningsRes = await fetch(`${API}/matches/${matchId}/current-innings`);
     if (inningsRes.ok) {
@@ -914,17 +1015,7 @@ async function loadPlayers() {
   state.teamBIds = [];
   state.commonPlayerIds = [];
   renderAttendanceList();
-  renderAssignTapList();
-}
-
-function renderAttendanceList() {
-  const container = document.getElementById('attendance-list');
-  container.innerHTML = state.players.map(p => `
-    <div class="attend-row">
-      <input type="checkbox" id="attend-${p.id}" ${state.attendingIds.has(p.id) ? 'checked' : ''} onchange="toggleAttendance(${p.id})">
-      <label for="attend-${p.id}">${p.name}</label>
-    </div>`).join('');
-  updateAttendanceCount();
+  renderTeamAssignList();
 }
 
 function toggleMatchSettings(forceCollapse) {
@@ -936,9 +1027,39 @@ function toggleMatchSettings(forceCollapse) {
   if (chevron) chevron.innerText = shouldCollapse ? '▼' : '▲';
 }
 
+// Step 1: who's playing today. A plain search + tick list of the whole roster.
+function renderAttendanceList() {
+  const container = document.getElementById('attendance-list');
+  if (!container) return;
+  const query = (document.getElementById('attendance-search')?.value || '').trim().toLowerCase();
+  if (!state.players || state.players.length === 0) {
+    container.innerHTML = `<p class="helper-text" style="margin:6px;">No players yet — add one above.</p>`;
+    updateAttendanceCount();
+    return;
+  }
+  const filtered = state.players.filter(p => !query || p.name.toLowerCase().includes(query));
+  if (filtered.length === 0) {
+    container.innerHTML = `<p class="roster-no-results">No players match "${query}".</p>`;
+    updateAttendanceCount();
+    return;
+  }
+  container.innerHTML = filtered.map(p => `
+    <div class="attend-row">
+      <input type="checkbox" id="attend-${p.id}" ${state.attendingIds.has(p.id) ? 'checked' : ''} onchange="toggleAttendance(${p.id})">
+      <label for="attend-${p.id}">${p.name}</label>
+    </div>`).join('');
+  updateAttendanceCount();
+}
+
+function updateAttendanceCount() {
+  const el = document.getElementById('attendance-count');
+  if (el) el.innerText = `${state.attendingIds.size} player(s) selected`;
+}
+
 function toggleAttendance(playerId) {
   if (state.attendingIds.has(playerId)) {
     state.attendingIds.delete(playerId);
+    // No longer playing today - clear any team assignment they had too.
     state.teamAIds = state.teamAIds.filter(id => id !== playerId);
     state.teamBIds = state.teamBIds.filter(id => id !== playerId);
     state.commonPlayerIds = state.commonPlayerIds.filter(id => id !== playerId);
@@ -951,56 +1072,59 @@ function toggleAttendance(playerId) {
     }
   }
   updateAttendanceCount();
-  renderAssignTapList();
+  renderTeamAssignList();
 }
 
-function updateAttendanceCount() {
-  document.getElementById('attendance-count').innerText = `${state.attendingIds.size} player(s) selected`;
+// Which team (if any) a player is currently assigned to: 'A', 'B', 'C' (common), or null.
+function playerTeamOf(playerId) {
+  if (state.commonPlayerIds.includes(playerId)) return 'C';
+  if (state.teamAIds.includes(playerId)) return 'A';
+  if (state.teamBIds.includes(playerId)) return 'B';
+  return null;
 }
 
-function renderAssignTapList() {
-  const container = document.getElementById('assign-chip-box');
+// Step 2: only players ticked in Step 1 show up here, as compact wrapping chips.
+// Tap cycles: unassigned -> Team A -> Team B -> Common -> unassigned. Kept compact
+// on purpose (vs. one row per player) since attendance lists can run 15-20+ names.
+function renderTeamAssignList() {
+  const container = document.getElementById('team-assign-list');
   if (!container) return;
   const attendingPlayers = state.players.filter(p => state.attendingIds.has(p.id));
   if (attendingPlayers.length === 0) {
-    container.innerHTML = `<p class="helper-text" style="margin:6px;">Tick attendance above first, then assign teams here.</p>`;
+    container.innerHTML = `<p class="helper-text" style="margin:6px;">Tick who's playing in Step 1 first, then assign teams here.</p>`;
     updateTeamCountChips();
     return;
   }
   // Always render in stable (original) order - never re-sort by group,
-  // otherwise chips visually jump around when the last player gets assigned.
+  // otherwise chips visually jump around as players get assigned.
   container.innerHTML = attendingPlayers.map(p => {
+    const team = playerTeamOf(p.id);
     let cls = '';
-    if (state.commonPlayerIds.includes(p.id)) cls = 'common';
-    else if (state.teamAIds.includes(p.id)) cls = 'team-a';
-    else if (state.teamBIds.includes(p.id)) cls = 'team-b';
+    if (team === 'C') cls = 'common';
+    else if (team === 'A') cls = 'team-a';
+    else if (team === 'B') cls = 'team-b';
     return `<span class="player-chip ${cls}" onclick="cyclePlayerChip(${p.id})">${p.name}</span>`;
   }).join('');
   updateTeamCountChips();
 }
 
 function cyclePlayerChip(playerId) {
-  const inCommon = state.commonPlayerIds.includes(playerId);
-  const inA = !inCommon && state.teamAIds.includes(playerId);
-  const inB = !inCommon && state.teamBIds.includes(playerId);
-
+  const current = playerTeamOf(playerId);
   state.teamAIds = state.teamAIds.filter(id => id !== playerId);
   state.teamBIds = state.teamBIds.filter(id => id !== playerId);
   state.commonPlayerIds = state.commonPlayerIds.filter(id => id !== playerId);
 
-  if (!inA && !inB && !inCommon) {
+  if (!current) {
     state.teamAIds.push(playerId);
-  } else if (inA) {
+  } else if (current === 'A') {
     state.teamBIds.push(playerId);
-  } else if (inB) {
+  } else if (current === 'B') {
     // Only one Common Player is allowed per match - selecting a new one
     // automatically clears any previously assigned common player.
-    state.commonPlayerIds = [];
-    state.commonPlayerIds.push(playerId);
-  } else if (inCommon) {
-    // cycles back to unassigned
+    state.commonPlayerIds = [playerId];
   }
-  renderAssignTapList();
+  // else current === 'C': cycles back to unassigned (already removed above)
+  renderTeamAssignList();
 }
 
 

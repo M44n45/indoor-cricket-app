@@ -248,3 +248,72 @@ landing page) from v0.64 to v0.7 to reflect everything accumulated in
 this session (watch-live fixes, admin auth + delete, continue-scoring
 fielder fix, match history redesign, scoring-page ball-by-ball recap,
 and the PWA wiring).
+
+v0.93 UPDATE
+=============
+1) Watch Live bowling table was missing Maidens/Wides/No-Balls
+   The /scorecard endpoint already computed these (bowlerExtras), the
+   Watch Live table just never rendered them. Header/row now match the
+   Scoring page: Bowler | Ov | M | R | W | Wd | Nb | Econ.
+   (public/app.js, public/index.html)
+
+2) Fall of Wickets never showed who took the wicket
+   fall_of_wickets query only joined the batsman's name. Added a join
+   through batting_records (which already stores bowler_id/fielder_id/
+   dismissal_type on dismissal) to bowler + fielder names, and a new
+   formatDismissal() helper on the frontend. Now renders e.g.
+   "1-14 (Kailas, b Robin, 1.0 ov)" with c/st/run-out formatting.
+   (src/routes/scoring.js, public/app.js)
+
+3) Match Setup: merged "Who's Playing Today?" + "Assign Teams" into a
+   single searchable roster list. Each row has A/B/C buttons - tapping
+   one adds the player to that team AND marks them as playing in one
+   tap; tapping the active letter again removes them. Added a search
+   box. Removes the old two-list, tick-then-find-again, tap-to-cycle
+   flow. (public/index.html, public/app.js)
+
+4) Bonus fix found while tracing #3: addPlayer() was calling
+   loadPlayers(), which resets teamAIds/teamBIds/commonPlayerIds -
+   adding a player mid-setup silently wiped out team assignments
+   already made. addPlayer() now just refreshes the player list
+   without touching current assignments.
+
+Bumped app.js cache-busting query string to ?v=73, sw.js CACHE_NAME to
+v9, and the visible version badge to v0.93.
+
+v0.94 UPDATE
+=============
+Reworked Setup back into 2 explicit steps per feedback (the merged
+single-list version from v0.93 combined ticking attendance with team
+assignment into one action, but that's not how the workflow actually
+runs):
+
+Step 1 - "Who's Playing Today?" - tick everyone present from the full
+roster (search box included). This is attendance only, no team yet.
+
+Step 2 - "Assign Teams" - only players ticked in Step 1 appear here.
+Tap A / B / C per player (C = the one shared Common Player, tapping
+a new C automatically replaces any previous one). Tap an active
+letter again to clear that player's assignment. Kept the explicit
+A/B/C buttons from v0.93 instead of going back to the old blind
+tap-to-cycle chip.
+
+Un-ticking someone in Step 1 also clears any team assignment they
+had in Step 2.
+
+(public/index.html, public/app.js)
+
+Bumped app.js cache-busting query string to ?v=74, sw.js CACHE_NAME to
+v10, and the visible version badge to v0.94.
+
+v0.95 UPDATE
+=============
+Step 2 "Assign Teams" reverted from one-row-per-player with A/B/C
+buttons back to the original compact wrapping chip list (tap a name
+to cycle unassigned -> Team A -> Team B -> Common -> unassigned).
+The button-row version took too much vertical space with 15-20+
+players ticked in Step 1. Step 1 (attendance ticking) is unchanged.
+(public/index.html, public/app.js)
+
+Bumped app.js cache-busting query string to ?v=75, sw.js CACHE_NAME to
+v11, and the visible version badge to v0.95.

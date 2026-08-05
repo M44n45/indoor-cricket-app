@@ -262,6 +262,7 @@ async function apiFetch(url, opts = {}) {
   // Mutations: change batsman
   if (url.match(/\/innings\/(-?\d+)\/change-batsman$/) && method === 'POST') {
     const m = url.match(/\/innings\/(-?\d+)\/change-batsman$/);
+    body.new_striker_id = normalizeNullableInt(body.new_striker_id);
     await OfflineDB.offlineChangeBatsman(parseInt(m[1]), body.new_striker_id);
     await OfflineDB.enqueue(url, method, body, null);
     refreshOfflineQueueCount();
@@ -271,6 +272,7 @@ async function apiFetch(url, opts = {}) {
   // Mutations: change bowler
   if (url.match(/\/innings\/(-?\d+)\/change-bowler$/) && method === 'POST') {
     const m = url.match(/\/innings\/(-?\d+)\/change-bowler$/);
+    body.new_bowler_id = normalizeNullableInt(body.new_bowler_id);
     await OfflineDB.offlineChangeBowler(parseInt(m[1]), body.new_bowler_id);
     await OfflineDB.enqueue(url, method, body, null);
     refreshOfflineQueueCount();
@@ -1724,6 +1726,20 @@ function populateInningsSelectors() {
 
 function nameOf(id) { return (state.players.find(p => p.id === id) || {}).name || id; }
 
+function normalizeNullableInt(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? Math.trunc(value) : null;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.toLowerCase() === 'null' || trimmed.toLowerCase() === 'undefined') return null;
+    const parsed = Number.parseInt(trimmed, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 async function startInnings(inningsNo = 1) {
   const battingTeam = document.getElementById('innings-batting-team').value;
   const bowlingTeam = battingTeam === 'A' ? 'B' : 'A';
@@ -1771,8 +1787,12 @@ function promptOpeningBatsmanAndBowler(battingTeam) {
 }
 
 async function confirmOpeningPlayers() {
-  const strikerId = parseInt(document.getElementById('opening-striker-select').value);
-  const bowlerId = parseInt(document.getElementById('opening-bowler-select').value);
+  const strikerId = normalizeNullableInt(document.getElementById('opening-striker-select').value);
+  const bowlerId = normalizeNullableInt(document.getElementById('opening-bowler-select').value);
+  if (strikerId === null || bowlerId === null) {
+    alert('Please choose both an opening batsman and bowler.');
+    return;
+  }
   await apiFetch(`${API}/matches/innings/${state.inningsId}/change-batsman`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ new_striker_id: strikerId })
   });
@@ -1951,8 +1971,8 @@ async function promptNextBatsmanThenBowler() {
 }
 
 async function confirmNextBatsmanAndBowler() {
-  const strikerId = parseInt(document.getElementById('next-batsman-select').value);
-  const bowlerId = parseInt(document.getElementById('next-bowler-select').value);
+  const strikerId = normalizeNullableInt(document.getElementById('next-batsman-select').value);
+  const bowlerId = normalizeNullableInt(document.getElementById('next-bowler-select').value);
   await apiFetch(`${API}/matches/innings/${state.inningsId}/change-batsman`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ new_striker_id: strikerId })
   });
@@ -1993,7 +2013,7 @@ async function promptNextBatsman() {
 }
 
 async function confirmNextBatsman() {
-  const newId = parseInt(document.getElementById('next-batsman-select').value);
+  const newId = normalizeNullableInt(document.getElementById('next-batsman-select').value);
   await apiFetch(`${API}/matches/innings/${state.inningsId}/change-batsman`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ new_striker_id: newId })
   });
@@ -2049,7 +2069,7 @@ async function selectExtraRuns(runs) {
 
 async function changeBatsman() {
   if (!ensureScoringAllowed()) return;
-  const newId = parseInt(document.getElementById('striker-select').value);
+  const newId = normalizeNullableInt(document.getElementById('striker-select').value);
   await apiFetch(`${API}/matches/innings/${state.inningsId}/change-batsman`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ new_striker_id: newId })
   });
@@ -2058,7 +2078,7 @@ async function changeBatsman() {
 
 async function changeBowler() {
   if (!ensureScoringAllowed()) return;
-  const newId = parseInt(document.getElementById('bowler-select').value);
+  const newId = normalizeNullableInt(document.getElementById('bowler-select').value);
   await apiFetch(`${API}/matches/innings/${state.inningsId}/change-bowler`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ new_bowler_id: newId })
   });
@@ -2328,7 +2348,7 @@ function promptNextBowler(bowlIds, currentBowlerId) {
 }
 
 async function confirmNextBowler() {
-  const newId = parseInt(document.getElementById('next-bowler-select').value);
+  const newId = normalizeNullableInt(document.getElementById('next-bowler-select').value);
   await apiFetch(`${API}/matches/innings/${state.inningsId}/change-bowler`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ new_bowler_id: newId })
   });

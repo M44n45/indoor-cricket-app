@@ -4,6 +4,20 @@ const router = express.Router();
 const pool = require('../db/pool');
 const { requireAdminToken } = require('./admin');
 
+function normalizeNullableInt(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? Math.trunc(value) : null;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.toLowerCase() === 'null' || trimmed.toLowerCase() === 'undefined') return null;
+    const parsed = Number.parseInt(trimmed, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 // Create a match, split teams (supports one common player on both sides)
 router.post('/', async (req, res) => {
   const {
@@ -99,11 +113,11 @@ router.post('/:matchId/innings', async (req, res) => {
 // Change striker mid-innings
 router.post('/innings/:inningsId/change-batsman', async (req, res) => {
   const { inningsId } = req.params;
-  const { new_striker_id } = req.body;
-  await pool.query('UPDATE innings SET striker_id=$1 WHERE id=$2', [new_striker_id, inningsId]);
+  const newStrikerId = normalizeNullableInt(req.body.new_striker_id);
+  await pool.query('UPDATE innings SET striker_id=$1 WHERE id=$2', [newStrikerId, inningsId]);
   await pool.query(
     `UPDATE batting_records SET status='batting' WHERE innings_id=$1 AND player_id=$2`,
-    [inningsId, new_striker_id]
+    [inningsId, newStrikerId]
   );
   res.json({ success: true });
 });
@@ -111,8 +125,8 @@ router.post('/innings/:inningsId/change-batsman', async (req, res) => {
 // Change bowler mid-innings
 router.post('/innings/:inningsId/change-bowler', async (req, res) => {
   const { inningsId } = req.params;
-  const { new_bowler_id } = req.body;
-  await pool.query('UPDATE innings SET bowler_id=$1 WHERE id=$2', [new_bowler_id, inningsId]);
+  const newBowlerId = normalizeNullableInt(req.body.new_bowler_id);
+  await pool.query('UPDATE innings SET bowler_id=$1 WHERE id=$2', [newBowlerId, inningsId]);
   res.json({ success: true });
 });
 

@@ -249,12 +249,27 @@
     return { success: true, overs_completed: innings.overs_completed, wicket_fell: is_wicket, innings_over: inningsOver, all_out: allOut };
   }
 
+  function normalizeNullableInt(value) {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? Math.trunc(value) : null;
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed || trimmed.toLowerCase() === 'null' || trimmed.toLowerCase() === 'undefined') return null;
+      const parsed = Number.parseInt(trimmed, 10);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  }
+
   async function offlineChangeBatsman(inningsId, newStrikerId) {
     const key = `scorecard_${inningsId}`;
     const sc = await cacheGet(key);
     if (!sc) return;
-    sc.innings.striker_id = newStrikerId;
-    const rec = sc.batting.find(b => b.player_id === newStrikerId);
+    const strikerId = normalizeNullableInt(newStrikerId);
+    sc.innings.striker_id = strikerId;
+    const rec = sc.batting.find(b => b.player_id === strikerId);
     if (rec && rec.status !== 'out') rec.status = 'batting';
     await cacheSet(key, sc);
   }
@@ -263,7 +278,7 @@
     const key = `scorecard_${inningsId}`;
     const sc = await cacheGet(key);
     if (!sc) return;
-    sc.innings.bowler_id = newBowlerId;
+    sc.innings.bowler_id = normalizeNullableInt(newBowlerId);
     await cacheSet(key, sc);
   }
 

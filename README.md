@@ -44,7 +44,6 @@ indoor-cricket-app/
     ├── server.js
     ├── db/
     │   ├── schema.sql
-    │   ├── seed_players.sql          (gitignored — your real roster, not committed)
     │   ├── seed_players.example.sql  (template — copy to seed_players.sql to use)
     │   ├── pool.js
     │   └── init.js

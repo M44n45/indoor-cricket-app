@@ -427,3 +427,36 @@ not a primary call-to-action).
 
 Bumped: sw.js CACHE_NAME to v16 (index.html changed). app.js itself is
 unchanged this pass, so its cache-busting query string stays at ?v=79.
+
+v0.98 UPDATE (Anonymous usage tracking)
+=============
+Added lightweight, anonymous device tracking to answer "how many people are
+using this" — both historic and concurrent — without collecting any names,
+and without risking the Render free-tier limits (750 free instance-hours/
+month, 1GB/30-day Postgres).
+
+How it works:
+- Client generates a random UUID once (localStorage: cricketDeviceId) and
+  sends it as an X-Device-Id header on API calls. No new network traffic
+  was added for this — it rides along on requests the app already makes
+  (button taps, live-score polling, page loads), so it can never keep a
+  sleeping free-tier instance awake the way a dedicated heartbeat would.
+- Server-side (src/logic/usageTracking.js) debounces writes to at most once
+  per device per minute, then upserts into two new tables:
+    - device_last_seen: ONE row per device, ever. Powers "active now" via
+      last_seen > now() - 3 minutes.
+    - device_visits: ONE row per device PER DAY. Powers historic distinct-
+      device counts (today / 7d / 30d / all-time / daily breakdown).
+  Both stay tiny regardless of traffic volume — nowhere close to the 1GB
+  free Postgres cap.
+- New GET /api/admin/usage-stats endpoint (password-protected, same admin
+  token as the rest of the admin console).
+- Admin Console now shows a Usage card: Active Now / Today / Last 7 Days /
+  Last 30 Days / All Time, plus a 14-day daily breakdown table.
+
+Known limitation: Render's free Postgres plan itself expires after 30 days
+(14-day grace period) unless upgraded, so "all-time" history resets if that
+ever happens — this is a property of the free DB plan, not something this
+feature can work around.
+
+Bumped: app.js cache-busting query string to ?v=80, sw.js CACHE_NAME to v17.

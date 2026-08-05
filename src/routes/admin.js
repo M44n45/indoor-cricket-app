@@ -71,4 +71,33 @@ router.post('/login', async (req, res) => {
 });
 
 router.requireAdminToken = requireAdminToken;
+
+// Anonymous usage stats: distinct devices, not accounts. See usageTracking.js
+// for how these two small tables are populated (one row per device, one row
+// per device per day — never one row per request).
+router.get('/usage-stats', requireAdminToken, async (req, res) => {
+  const [activeRes, todayRes, weekRes, monthRes, allTimeRes, dailyRes] = await Promise.all([
+    pool.query(`SELECT COUNT(*) FROM device_last_seen WHERE last_seen > NOW() - INTERVAL '3 minutes'`),
+    pool.query(`SELECT COUNT(DISTINCT device_id) FROM device_visits WHERE day = CURRENT_DATE`),
+    pool.query(`SELECT COUNT(DISTINCT device_id) FROM device_visits WHERE day > CURRENT_DATE - INTERVAL '7 days'`),
+    pool.query(`SELECT COUNT(DISTINCT device_id) FROM device_visits WHERE day > CURRENT_DATE - INTERVAL '30 days'`),
+    pool.query(`SELECT COUNT(DISTINCT device_id) FROM device_visits`),
+    pool.query(`
+      SELECT day, COUNT(DISTINCT device_id) AS devices
+      FROM device_visits
+      WHERE day > CURRENT_DATE - INTERVAL '14 days'
+      GROUP BY day
+      ORDER BY day DESC
+    `)
+  ]);
+  res.json({
+    active_now: parseInt(activeRes.rows[0].count, 10),
+    today: parseInt(todayRes.rows[0].count, 10),
+    last_7_days: parseInt(weekRes.rows[0].count, 10),
+    last_30_days: parseInt(monthRes.rows[0].count, 10),
+    all_time: parseInt(allTimeRes.rows[0].count, 10),
+    daily: dailyRes.rows.map(r => ({ day: r.day, devices: parseInt(r.devices, 10) }))
+  });
+});
+
 module.exports = router;

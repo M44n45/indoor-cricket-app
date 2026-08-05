@@ -1,4 +1,31 @@
 const API = '/api';
+
+// --- Anonymous device ID for usage tracking (no names/accounts — just a
+// random ID generated once per browser and reused, so the admin console can
+// count distinct devices). Stored in localStorage so it survives reloads.
+function getDeviceId() {
+  let id = localStorage.getItem('cricketDeviceId');
+  if (!id) {
+    id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `dev-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    localStorage.setItem('cricketDeviceId', id);
+  }
+  return id;
+}
+// Tag every API call with the device ID without touching each fetch() call
+// site individually. Piggybacks on requests the app is already making —
+// no separate heartbeat/polling loop, so this never keeps a sleeping Render
+// free-tier instance awake by itself.
+(function tagFetchWithDeviceId() {
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = (input, init = {}) => {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (url.startsWith(API)) {
+      init = { ...init, headers: { ...(init.headers || {}), 'X-Device-Id': getDeviceId() } };
+    }
+    return originalFetch(input, init);
+  };
+})();
+
 let state = {
   players: [], matchId: null, inningsId: null,
   swipeQueue: [], swipeIndex: 0, teamAIds: [], teamBIds: [],
@@ -739,7 +766,42 @@ async function loadAdminConsole() {
   }).join('');
   const gear = document.getElementById('floating-admin-gear');
   if (gear) gear.style.display = 'none';
-  document.getElementById('admin-view').innerHTML = `<div class="card" style="margin-top:24px;"><div style="display:flex; justify-content:space-between; align-items:center; gap:12px;"><div><h2>Existing Matches</h2><p class="helper-text">Use this to force-match completion, resume a match to fix a mistake, or delete a match.</p></div><button class="btn btn-secondary" style="width:auto; flex:0 0 auto;" onclick="backToModeSelect()">Back</button></div>${rows || '<p class="helper-text">No matches found.</p>'}</div>`;
+  document.getElementById('admin-view').innerHTML = `
+    <div id="admin-usage-card" class="card" style="margin-top:24px;"><p class="helper-text">Loading usage stats…</p></div>
+    <div class="card"><div style="display:flex; justify-content:space-between; align-items:center; gap:12px;"><div><h2>Existing Matches</h2><p class="helper-text">Use this to force-match completion, resume a match to fix a mistake, or delete a match.</p></div><button class="btn btn-secondary" style="width:auto; flex:0 0 auto;" onclick="backToModeSelect()">Back</button></div>${rows || '<p class="helper-text">No matches found.</p>'}</div>`;
+  loadAdminUsageStats();
+}
+
+async function loadAdminUsageStats() {
+  const el = document.getElementById('admin-usage-card');
+  if (!el) return;
+  try {
+    const res = await fetch(`${API}/admin/usage-stats`, { headers: { 'x-admin-token': state.adminToken || '' } });
+    if (!res.ok) { el.innerHTML = '<p class="helper-text">Could not load usage stats.</p>'; return; }
+    const d = await res.json();
+    const dailyRows = (d.daily || []).map(r =>
+      `<tr><td>${new Date(r.day).toISOString().slice(0,10)}</td><td>${r.devices}</td></tr>`
+    ).join('') || '<tr><td colspan="2">No data yet</td></tr>';
+    el.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h2>Usage</h2>
+        <button class="btn-small" onclick="loadAdminUsageStats()">↻ Refresh</button>
+      </div>
+      <p class="helper-text">Distinct devices, not accounts — anonymous, no names collected.</p>
+      <div class="usage-stat-grid">
+        <div class="usage-stat"><div class="value">${d.active_now}</div><div class="label">Active Now</div></div>
+        <div class="usage-stat"><div class="value">${d.today}</div><div class="label">Today</div></div>
+        <div class="usage-stat"><div class="value">${d.last_7_days}</div><div class="label">Last 7 Days</div></div>
+        <div class="usage-stat"><div class="value">${d.last_30_days}</div><div class="label">Last 30 Days</div></div>
+        <div class="usage-stat"><div class="value">${d.all_time}</div><div class="label">All Time</div></div>
+      </div>
+      <table class="mini-table">
+        <thead><tr><th>Day</th><th>Devices</th></tr></thead>
+        <tbody>${dailyRows}</tbody>
+      </table>`;
+  } catch (e) {
+    el.innerHTML = '<p class="helper-text">Could not load usage stats.</p>';
+  }
 }
 
 async function markMatchCompleted(matchId) {

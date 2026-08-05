@@ -10,6 +10,7 @@ const matchesRouter = require('./routes/matches');
 const scoringRouter = require('./routes/scoring');
 const statsRouter = require('./routes/stats');
 const adminRouter = require('./routes/admin');
+const { usageMiddleware } = require('./logic/usageTracking');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,6 +27,9 @@ app.use(express.static('public', {
     res.set('Surrogate-Control', 'no-store');
   }
 }));
+
+// Anonymous device-count tracking (no PII) — see src/logic/usageTracking.js.
+app.use('/api', usageMiddleware);
 
 app.use('/api/players', playersRouter);
 app.use('/api/matches', matchesRouter);

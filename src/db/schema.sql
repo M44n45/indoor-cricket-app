@@ -142,3 +142,31 @@ CREATE TABLE IF NOT EXISTS external_leaderboard (
   best_bowling TEXT,
   uploaded_at TIMESTAMP DEFAULT NOW()
 );
+
+-- Anonymous usage tracking: no names, no accounts, just a random device ID
+-- generated client-side (see app.js) plus IP as a secondary signal.
+--
+-- device_last_seen holds exactly ONE row per device ever seen, so it never
+-- grows with traffic — safe for the free 1GB Postgres plan. Used to answer
+-- "how many distinct devices are active right now?"
+CREATE TABLE IF NOT EXISTS device_last_seen (
+  device_id TEXT PRIMARY KEY,
+  ip TEXT,
+  user_agent TEXT,
+  last_seen TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- device_visits holds ONE row per device PER DAY (not per request), so a
+-- busy scoring session doesn't multiply rows. Used for historic distinct-
+-- device counts over time.
+CREATE TABLE IF NOT EXISTS device_visits (
+  device_id TEXT NOT NULL,
+  day DATE NOT NULL DEFAULT CURRENT_DATE,
+  first_seen TIMESTAMP NOT NULL DEFAULT NOW(),
+  last_seen TIMESTAMP NOT NULL DEFAULT NOW(),
+  request_count INT NOT NULL DEFAULT 1,
+  PRIMARY KEY (device_id, day)
+);
+
+CREATE INDEX IF NOT EXISTS idx_device_visits_day ON device_visits(day);
+

@@ -220,6 +220,10 @@ body{
 }
 .player-card-stat .value{font-size:20px; font-weight:800; color:#1c1c1e;}
 .player-card-stat .label{font-size:10px; color:#8a8578; text-transform:uppercase; letter-spacing:0.4px; margin-top:2px;}
+.usage-stat-grid{display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin:10px 0;}
+.usage-stat{background:var(--bg-light); border-radius:12px; padding:10px 6px; text-align:center;}
+.usage-stat .value{font-size:19px; font-weight:800; color:var(--primary-dark);}
+.usage-stat .label{font-size:9.5px; color:var(--sub); text-transform:uppercase; letter-spacing:0.4px; margin-top:2px;}
 .player-card-close{
   display:block; margin:16px auto 0; background:none; border:none; color:#8a8578; font-size:13px; font-weight:600; cursor:pointer;
 }
@@ -746,7 +750,7 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
   <button onclick="showView('stats')" id="nav-stats"><span class="icon">🗓️</span>History</button>
 </nav>
 
-<script src="app.js?v=79"></script>
+<script src="app.js?v=80"></script>
   <button id="pwa-install-btn" class="pwa-install-btn" style="display:none;" onclick="triggerPwaInstall()">⬇️ Install App</button>
   <button id="floating-admin-gear" class="floating-admin-gear" onclick="enterAdminConsole()" aria-label="Admin Console">⚙️</button>
 </body>

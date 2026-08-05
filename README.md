@@ -3,6 +3,7 @@
 A modern, iOS-styled mobile web app for scoring indoor cricket with custom rules, plus historical stats import.
 
 ## Key features
+
 - Simplified single-mode launch (Scorer only for now — Watcher mode temporarily hidden while it's stabilized)
 - Team assignment via colored chips: tap a player to cycle Unassigned → Team A (red) → Team B (blue) → Common (green)
 - Undo Last Ball button on the Live Score screen — fully replays the innings from the remaining ball history after every undo, so you can undo as many times in a row as needed with guaranteed consistency
@@ -28,11 +29,14 @@ A modern, iOS-styled mobile web app for scoring indoor cricket with custom rules
 - Polished iOS-style UI: gradient scoreboard, pill-styled striker/bowler selectors, bottom tab bar, bottom-sheet modals
 - About page (landing screen footer link): what the app is, and a link to the GitHub repo — free to fork/self-host
 - Anonymous usage stats in the admin console: distinct devices active now, plus historic counts (today/7d/30d/all-time + daily breakdown) — no names or accounts, just a random per-browser device ID
+- Offline Support added
 
 ## Stack
+
 Node.js + Express + PostgreSQL, containerized with Docker Compose. PDF parsing via `pdf-parse`, file uploads via `multer`.
 
 ## Project structure
+
 ```
 indoor-cricket-app/
 ├── Dockerfile
@@ -58,6 +62,7 @@ indoor-cricket-app/
 ```
 
 ## Pre-loaded roster
+
 Player names aren't hardcoded into the app — `src/db/seed_players.sql` is gitignored, so a
 fresh clone of this repo boots with an empty roster rather than someone else's friend group.
 To pre-seed your own: copy `src/db/seed_players.example.sql` to `src/db/seed_players.sql`,
@@ -67,6 +72,7 @@ in the app itself.
 ## Deploy on your Proxmox VM
 
 ### 1. Prepare the VM (first time only)
+
 ```bash
 ssh ubuntu@<vm-ip>
 curl -fsSL https://get.docker.com | sh
@@ -75,6 +81,7 @@ newgrp docker
 ```
 
 ### 2. Transfer the package
+
 ```bash
 scp indoor-cricket-app-v6-final.zip ubuntu@<vm-ip>:/home/ubuntu/
 ssh ubuntu@<vm-ip>
@@ -83,17 +90,21 @@ cd indoor-cricket-app
 ```
 
 ### 3. Build and run
+
 This round changed backend innings-creation logic (striker_id/bowler_id now optional) and admin
 password checks — no destructive schema change, but a clean rebuild is recommended:
+
 ```bash
 docker compose down -v
 docker compose up -d --build
 ```
 
 ### 4. Access the app
+
 Open `http://<vm-ip>:3000`. Add to home screen for an app-like feel.
 
 ### 5. Using the app
+
 1. **Setup tab**: tick attendance, tap "Team A"/"Team B" next to each attending player to assign them, pick a Common Player if one exists, set overs (decimals allowed), and create the match.
 2. **Start the Match**: choose who bats first and tap Start Innings — you'll then be asked to confirm the opening batsman and bowler right on the Live Score screen.
 3. **Live Score tab**: score deliveries; Wide is instant, No Ball prompts for exact extra runs (shown on the tracker), Wicket prompts for dismissal + fielder then the next batsman. Use "Retire Batsman" anytime. Bowler-change prompt appears automatically each over-end, and an innings-complete prompt appears when overs run out or the side is all out.
@@ -101,13 +112,16 @@ Open `http://<vm-ip>:3000`. Add to home screen for an app-like feel.
 5. **Stats tab**: match history (date-only), daily stats, overall stats with win/loss and win%.
 
 ### 6. Admin password for leaderboard uploads
+
 Default password is `cricket123`. Override it by setting an environment variable in `docker-compose.yml`:
+
 ```yaml
 environment:
   - LEADERBOARD_ADMIN_PASSWORD=your_new_password
 ```
 
 ### 7. Expose remotely via Cloudflare Tunnel (optional)
+
 ```yaml
 ingress:
   - hostname: cricket.yourdomain.com
@@ -116,11 +130,13 @@ ingress:
 ```
 
 ### 8. Backups
+
 ```bash
 docker exec indoor-cricket-db pg_dump -U cricket cricketdb > cricket_backup_$(date +%F).sql
 ```
 
 ## API quick reference
+
 - `POST /api/players` — add player `{name, is_common_player}`
 - `POST /api/matches` — create match + split teams
 - `POST /api/matches/:matchId/innings` — start an innings `{innings_no, batting_team, bowling_team}` (striker/bowler set separately)

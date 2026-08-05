@@ -1,6 +1,6 @@
 // sw.js — app-shell caching for the Cricket Scorer PWA.
 // Bump CACHE_NAME whenever index.html/app.js change so old clients pick up the update.
-const CACHE_NAME = 'cricket-scorer-v2';
+const CACHE_NAME = 'cricket-scorer-v8';
 const APP_SHELL = [
   '/',
   '/index.html',

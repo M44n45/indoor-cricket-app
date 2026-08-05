@@ -4,6 +4,75 @@ const router = express.Router();
 const pool = require('../db/pool');
 const { getEligibleBatsmen } = require('../logic/rotation');
 
+// Shared by the live watch scorecard and the full match scorecard: groups an
+// innings' ball_events into per-over recap rows (bowler, batsman on strike,
+// runs/wickets in the over, and a pill per ball for the strip UI).
+async function computeOversRecap(inningsId) {
+  const events = await pool.query(
+    `SELECT be.*, bat.name AS batsman_name, bowl.name AS bowler_name
+     FROM ball_events be
+     JOIN players bat ON bat.id = be.batsman_id
+     JOIN players bowl ON bowl.id = be.bowler_id
+     WHERE be.innings_id=$1
+     ORDER BY be.over_no ASC, be.ball_no ASC, be.id ASC`,
+    [inningsId]
+  );
+  const oversMap = {};
+  for (const e of events.rows) {
+    if (!oversMap[e.over_no]) {
+      oversMap[e.over_no] = { over_no: e.over_no, bowler_name: e.bowler_name, balls: [], runs: 0, wickets: 0 };
+    }
+    const o = oversMap[e.over_no];
+    const totalBallRuns = e.runs + (e.extra_runs || 0);
+    o.runs += totalBallRuns;
+    if (e.is_wicket) o.wickets += 1;
+    o.batsman_name = e.batsman_name;
+    o.balls.push({
+      runs: e.runs,
+      extra_type: e.extra_type,
+      extra_runs: e.extra_runs,
+      is_wicket: e.is_wicket,
+      display: e.is_wicket ? 'W' : (e.extra_type === 'wide' ? 'Wd' : e.extra_type === 'no_ball' ? 'Nb' : String(e.runs))
+    });
+  }
+  return Object.values(oversMap).sort((a, b) => a.over_no - b.over_no);
+}
+
+// Computes per-bowler maidens, wides and no-balls for an innings directly from
+// ball_events, so these stats are always in sync with undo/replay without
+// needing extra columns kept up to date on every scoring mutation.
+async function computeBowlerExtras(inningsId) {
+  const extrasRes = await pool.query(
+    `SELECT bowler_id,
+       COUNT(*) FILTER (WHERE extra_type = 'wide') AS wides,
+       COUNT(*) FILTER (WHERE extra_type = 'no_ball') AS no_balls
+     FROM ball_events WHERE innings_id=$1 GROUP BY bowler_id`,
+    [inningsId]
+  );
+  const maidensRes = await pool.query(
+    `WITH over_totals AS (
+       SELECT over_no,
+         (ARRAY_AGG(bowler_id ORDER BY ball_no ASC))[1] AS bowler_id,
+         COUNT(*) FILTER (WHERE extra_type IS DISTINCT FROM 'wide' AND extra_type IS DISTINCT FROM 'no_ball') AS legal_balls,
+         SUM(runs + extra_runs) AS over_runs
+       FROM ball_events WHERE innings_id=$1 GROUP BY over_no
+     )
+     SELECT bowler_id, COUNT(*) AS maidens
+     FROM over_totals WHERE legal_balls = 6 AND over_runs = 0
+     GROUP BY bowler_id`,
+    [inningsId]
+  );
+  const map = {};
+  for (const row of extrasRes.rows) {
+    map[row.bowler_id] = { wides: parseInt(row.wides), no_balls: parseInt(row.no_balls), maidens: 0 };
+  }
+  for (const row of maidensRes.rows) {
+    if (!map[row.bowler_id]) map[row.bowler_id] = { wides: 0, no_balls: 0, maidens: 0 };
+    map[row.bowler_id].maidens = parseInt(row.maidens);
+  }
+  return map;
+}
+
 function oversToBalls(overs) {
   // Decimal overs where .5 = half an over = 3 balls (e.g. 3.5 -> 21 balls)
   return Math.round(parseFloat(overs) * 6);
@@ -206,11 +275,19 @@ router.get('/innings/:inningsId/scorecard', async (req, res) => {
      WHERE bwr.innings_id=$1`,
     [inningsId]
   );
+  const bowlerExtras = await computeBowlerExtras(inningsId);
+  const bowlingWithExtras = bowling.rows.map(b => ({
+    ...b,
+    maidens: bowlerExtras[b.player_id]?.maidens || 0,
+    wides: bowlerExtras[b.player_id]?.wides || 0,
+    no_balls: bowlerExtras[b.player_id]?.no_balls || 0
+  }));
   const fow = await pool.query(
     `SELECT fow.*, p.name FROM fall_of_wickets fow JOIN players p ON p.id = fow.player_id
      WHERE fow.innings_id=$1 ORDER BY fow.wicket_no`,
     [inningsId]
   );
+  const overs_recap = await computeOversRecap(inningsId);
 
   let firstInnings = null;
   if (battingInnings && battingInnings.innings_no === 2) {
@@ -231,7 +308,7 @@ router.get('/innings/:inningsId/scorecard', async (req, res) => {
     }
   }
 
-  res.json({ innings: battingInnings, batting: batting.rows, bowling: bowling.rows, fall_of_wickets: fow.rows, first_innings: firstInnings });
+  res.json({ innings: battingInnings, batting: batting.rows, bowling: bowlingWithExtras, fall_of_wickets: fow.rows, overs_recap, first_innings: firstInnings });
 });
 
 // Ball-by-ball events for a specific over
@@ -438,38 +515,18 @@ router.get('/matches/:matchId/full-scorecard', async (req, res) => {
        WHERE bwr.innings_id=$1`,
       [inn.id]
     );
+    const bowlerExtras = await computeBowlerExtras(inn.id);
+    const bowlingWithExtras = bowling.rows.map(b => ({
+      ...b,
+      maidens: bowlerExtras[b.player_id]?.maidens || 0,
+      wides: bowlerExtras[b.player_id]?.wides || 0,
+      no_balls: bowlerExtras[b.player_id]?.no_balls || 0
+    }));
 
     // Per-ball recap grouped by over, for the ball-by-ball strip in the scorecard
-    const events = await pool.query(
-      `SELECT be.*, bat.name AS batsman_name, bowl.name AS bowler_name
-       FROM ball_events be
-       JOIN players bat ON bat.id = be.batsman_id
-       JOIN players bowl ON bowl.id = be.bowler_id
-       WHERE be.innings_id=$1
-       ORDER BY be.over_no ASC, be.ball_no ASC, be.id ASC`,
-      [inn.id]
-    );
-    const oversMap = {};
-    for (const e of events.rows) {
-      if (!oversMap[e.over_no]) {
-        oversMap[e.over_no] = { over_no: e.over_no, bowler_name: e.bowler_name, balls: [], runs: 0, wickets: 0 };
-      }
-      const o = oversMap[e.over_no];
-      const totalBallRuns = e.runs + (e.extra_runs || 0);
-      o.runs += totalBallRuns;
-      if (e.is_wicket) o.wickets += 1;
-      o.batsman_name = e.batsman_name;
-      o.balls.push({
-        runs: e.runs,
-        extra_type: e.extra_type,
-        extra_runs: e.extra_runs,
-        is_wicket: e.is_wicket,
-        display: e.is_wicket ? 'W' : (e.extra_type === 'wide' ? 'Wd' : e.extra_type === 'no_ball' ? 'Nb' : String(e.runs))
-      });
-    }
-    const overs_recap = Object.values(oversMap).sort((a, b) => a.over_no - b.over_no);
+    const overs_recap = await computeOversRecap(inn.id);
 
-    result.push({ innings: inn, batting: batting.rows, bowling: bowling.rows, overs_recap });
+    result.push({ innings: inn, batting: batting.rows, bowling: bowlingWithExtras, overs_recap });
   }
   res.json(result);
 });

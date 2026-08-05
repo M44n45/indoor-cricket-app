@@ -111,6 +111,14 @@ CREATE TABLE IF NOT EXISTS match_availability (
   UNIQUE(match_id, player_id)
 );
 
+CREATE TABLE IF NOT EXISTS admin_settings (
+  id INT PRIMARY KEY DEFAULT 1,
+  password_hash TEXT NOT NULL,
+  salt TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT NOW(),
+  CHECK (id = 1)
+);
+
 CREATE TABLE IF NOT EXISTS external_leaderboard (
   id SERIAL PRIMARY KEY,
   source_label TEXT, -- e.g. filename or 'Week 12 upload'

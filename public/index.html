@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Cricket Scorer</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#15803d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cricket Scorer">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
@@ -207,6 +215,47 @@ body{
 .clickable-name:active{text-decoration-color:var(--primary);}
 .clickable-row{cursor:pointer;}
 .clickable-row:active{background:rgba(34,197,94,0.08);}
+.watch-card-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-top:8px;}
+.watch-match-card{width:100%; text-align:left; border:1px solid var(--border); border-radius:18px; padding:12px; background:linear-gradient(180deg,#ffffff,#f8fafc); box-shadow:0 6px 18px rgba(15,23,42,0.06); cursor:pointer; display:flex; flex-direction:column; gap:8px;}
+.watch-card-top{display:flex; align-items:flex-start; justify-content:space-between; gap:10px;}
+.watch-team-stack{display:flex; flex-direction:column; gap:6px;}
+.watch-team-row{display:flex; align-items:center; gap:8px; font-size:14px; font-weight:800; color:var(--text);} 
+.watch-team-dot{width:10px; height:10px; border-radius:999px; flex:0 0 auto;}
+.watch-team-name{line-height:1.1;}
+.watch-score-stack{text-align:right; min-width:72px;}
+.watch-card-score{font-size:26px; font-weight:900; color:var(--text); line-height:1;}
+.watch-card-overs{font-size:12px; color:var(--sub); margin-top:3px;}
+.watch-card-title{font-weight:700; font-size:13px; color:var(--text); line-height:1.25;}
+.watch-card-bottom{font-size:12px; color:var(--sub);}
+.history-month-header{font-weight:800; font-size:13px; color:var(--sub); text-transform:uppercase; letter-spacing:0.04em; margin-top:18px; margin-bottom:6px;}
+.history-month-header:first-child{margin-top:4px;}
+.history-day-header{width:100%; display:flex; align-items:center; justify-content:space-between; gap:8px; background:#f8fafc; border:1px solid var(--border); border-radius:12px; padding:10px 14px; font-weight:700; font-size:13.5px; color:var(--text); cursor:pointer; margin-top:8px;}
+.history-day-header .history-day-count{font-weight:600; color:var(--sub); font-size:12px;}
+.history-day-header .history-day-chevron{transition:transform .15s; color:var(--sub);}
+.history-day-header.expanded .history-day-chevron{transform:rotate(90deg);}
+.history-day-cards{margin-top:8px;}
+.history-result-win{color:var(--primary-dark); font-weight:700;}
+.history-result-tie{color:var(--orange); font-weight:700;}
+.history-result-progress{color:var(--blue); font-weight:700;}
+.ball-by-ball{display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;}
+.ball-chip{padding:8px 10px; border-radius:999px; background:#eef2ff; color:#1e3a8a; font-weight:700; font-size:12px;}
+.floating-admin-gear{position:fixed; right:16px; bottom:16px; width:48px; height:48px; border-radius:999px; border:none; background:#111827; color:#fff; font-size:22px; box-shadow:0 10px 24px rgba(0,0,0,0.24); z-index:9999; display:block;}
+.floating-admin-gear:active{transform:scale(0.96);}
+#back-to-landing-btn{display:block !important;}
+.watch-card{width:100%; text-align:left; border:1px solid var(--border); border-radius:16px; padding:12px; background:linear-gradient(180deg,#fff,#f7faf7); box-shadow:0 4px 12px rgba(0,0,0,0.06); cursor:pointer; display:flex; flex-direction:column; gap:8px;}
+.watch-card-top{display:flex; align-items:flex-start; justify-content:space-between; gap:10px;}
+.watch-card-title{font-weight:800; font-size:14px; color:var(--text); line-height:1.25;}
+.watch-card-meta{font-size:11px; color:var(--sub); margin-top:4px;}
+.watch-card-score{font-size:26px; font-weight:900; color:var(--primary); line-height:1; white-space:nowrap;}
+.watch-card-bottom{font-size:12px; color:var(--sub);}
+.ball-by-ball{display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;}
+.ball-chip{padding:8px 10px; border-radius:999px; background:#eef2ff; color:#1e3a8a; font-weight:700; font-size:12px;}
+.floating-admin-gear{position:fixed; right:16px; bottom:16px; width:48px; height:48px; border-radius:999px; border:none; background:#111827; color:#fff; font-size:22px; box-shadow:0 10px 24px rgba(0,0,0,0.24); z-index:9999; display:block;}
+.floating-admin-gear:active{transform:scale(0.96);}
+.pwa-install-btn{position:fixed; left:16px; bottom:16px; padding:12px 16px; border-radius:999px; border:none; background:var(--primary-dark); color:#fff; font-size:13.5px; font-weight:700; box-shadow:0 10px 24px rgba(0,0,0,0.24); z-index:9999;}
+.pwa-install-btn:active{transform:scale(0.96);}
+#back-to-landing-btn{display:block !important;}
+
 .player-pill select{
   border:none; background:white; border-radius:10px; padding:10px; font-size:16px; font-weight:600;
   box-shadow:0 1px 3px rgba(0,0,0,0.08); width:100%;
@@ -214,15 +263,6 @@ body{
 
 /* Ball tracker */
 .balls-row{display:flex; gap:6px; flex-wrap:wrap; margin:8px 0;}
-.ball-pill{
-  min-width:32px; height:32px; padding:0 4px; border-radius:16px; display:flex; align-items:center; justify-content:center;
-  font-size:12px; font-weight:700; color:white; background:#c7c7cc; flex-shrink:0;
-}
-.ball-pill.runs{background:var(--primary);}
-.ball-pill.four{background:var(--blue);}
-.ball-pill.six{background:#af52de;}
-.ball-pill.wicket{background:var(--red);}
-.ball-pill.extra{background:var(--orange);}
 .player-select-row{display:flex; gap:8px; margin-bottom:10px;}
 .player-select-row select{flex:1;}
 .player-select-row .sub-label{font-size:11px; color:var(--sub); margin-bottom:2px; display:block;}
@@ -312,13 +352,13 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
 </head>
 <body>
 
-<div class="topbar"><h1 id="topbar-title">Cricket Scorer <span style="font-size:10px; opacity:0.55; font-weight:400; vertical-align:middle;">v0.33</span></h1><div style="display:flex; gap:6px;"><button id="back-to-mode-btn" class="btn-small" onclick="backToModeSelect()">← Modes</button><button id="share-watch-btn" class="btn-small" style="display:none;" onclick="shareWatchLink()">🔗 Share</button></div></div>
+<div class="topbar"><h1 id="topbar-title">Cricket Scorer <span style="font-size:10px; opacity:0.55; font-weight:400; vertical-align:middle;">v0.91</span></h1><div style="display:flex; gap:6px;"><button id="back-to-mode-btn" class="btn-small" onclick="backToModeSelect()">← Modes</button><button id="share-watch-btn" class="btn-small" style="display:none;" onclick="shareWatchLink()">🔗 Share</button></div></div>
 
 <div id="mode-select-view">
   <div class="landing-hero">
     <div class="landing-hero-icon">🏏</div>
     <h1 class="landing-title">Indoor Cricket</h1>
-    <div class="landing-version-badge">v0.33</div>
+    <div class="landing-version-badge">v0.91</div>
     <p class="landing-subtitle">Score live matches, track stats, and follow along ball by ball.</p>
   </div>
 
@@ -354,9 +394,13 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
   <div class="landing-footer-note">🏆 Track leaderboards, full scorecards, and per-over stats once a match starts.</div>
 </div>
 
+<div id="admin-view" style="display:none;"></div>
+
 <div id="watch-view" style="display:none;">
   <div class="scoreboard">
-    <div class="teams"><span id="watch-batting-team">Team A</span><span id="watch-players-count"></span><span id="watch-overs-limit"></span></div>
+    <button id="watch-select-other-match-btn" class="btn btn-secondary btn-full" style="margin-bottom:10px; display:block;" onclick="backToWatchMatchList()">Select Other Match</button>
+    <div id="watch-winner-banner" style="display:none; background:rgba(255,255,255,0.2); border-radius:10px; padding:10px 12px; margin-bottom:8px; font-weight:700; text-align:center;"></div>
+        <div class="teams"><span id="watch-batting-team">Team A</span><span id="watch-players-count"></span><span id="watch-overs-limit"></span></div>
     <div class="runs" id="watch-score">0/0</div>
     <div class="meta"><span id="watch-overs">0.0 ov</span><span class="crr" id="watch-crr">CRR 0.00</span></div>
     <div class="target-row" id="watch-target-row" style="display:none; font-size:13px; margin-top:4px; opacity:0.9;">
@@ -379,6 +423,10 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
     <div class="balls-row" id="watch-this-over-balls"></div>
   </div>
   <div class="card">
+    <h2>Ball by Ball Recap</h2>
+    <div class="over-recap-container" id="watch-overs-recap"></div>
+  </div>
+  <div class="card">
     <h2>Batting</h2>
     <table id="watch-batting-table"><thead><tr><th>Batsman</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody></tbody></table>
   </div>
@@ -389,6 +437,9 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
   <div class="card">
     <h2>Fall of Wickets</h2>
     <div id="watch-fow" style="font-size:12px; color:var(--sub); line-height:1.6;"></div>
+  </div>
+  <div class="card" id="watch-back-to-list-card" style="display:none; text-align:center;">
+    <button class="btn btn-primary btn-full" onclick="backToWatchMatchList()">Watch Another Match</button>
   </div>
 </div>
 
@@ -515,7 +566,6 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
     </div>
     <span class="sub-label">This Over</span>
     <div class="balls-row" id="this-over-balls"></div>
-    <button class="btn-small" style="width:100%; margin-top:10px; background:#fef3c7; color:#92400e; border:1px solid #f59e0b;" onclick="undoLastBall()">↩️ Undo Last Ball</button>
   </div>
 
   <div class="card" id="score-ball-card">
@@ -535,19 +585,27 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
       <button class="btn wicket-btn" style="flex:1;" onclick="openWicketModal()">Wicket</button>
       <button class="btn" style="flex:1; background:#8e8e93; color:white;" onclick="retireBatsman()">Retire Batsman</button>
     </div>
+    <button class="btn-small" style="width:100%; margin-top:8px; background:#fef3c7; color:#92400e; border:1px solid #f59e0b;" onclick="undoLastBall()">↩️ Undo Last Ball</button>
+  </div>
+
+  <div class="card">
+    <h2>Ball by Ball Recap</h2>
+    <div class="over-recap-container" id="score-overs-recap"></div>
   </div>
 
   <div class="card">
     <h2>Batting</h2>
     <table id="batting-table"><thead><tr><th>Batsman</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody></tbody></table>
   </div>
-  <div class="card">
-    <button class="btn btn-secondary btn-full" onclick="openCompleteMatchModal()">End Match / Record Result</button>
-  </div>
 
   <div class="card">
     <h2>Bowling</h2>
-    <table id="bowling-table"><thead><tr><th>Bowler</th><th>Ov</th><th>R</th><th>W</th><th>Econ</th></tr></thead><tbody></tbody></table>
+    <table id="bowling-table"><thead><tr><th>Bowler</th><th>Ov</th><th>M</th><th>R</th><th>W</th><th>Wd</th><th>Nb</th><th>Econ</th></tr></thead><tbody></tbody></table>
+  </div>
+
+  <div class="card">
+    <button class="btn btn-secondary btn-full" onclick="openCompleteMatchModal()">End Match / Record Result</button>
+    <button class="btn btn-secondary btn-full" style="margin-top:8px; background:#8e8e93; color:white;" onclick="confirmAbandonMatch()">Abandon Match</button>
   </div>
 </div>
 
@@ -591,8 +649,8 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
 <div id="stats-view" style="display:none;">
   <div class="card">
     <h2>Match History</h2>
-    <p class="helper-text">Tap a match to view its full scorecard.</p>
-    <table id="history-table"><thead><tr><th>Date</th><th>Match</th><th>Result</th></tr></thead><tbody></tbody></table>
+    <p class="helper-text">Tap a match card to view its full scorecard.</p>
+    <div id="history-container"></div>
   </div>
   <div class="card">
     <h2>Daily Stats</h2>
@@ -616,6 +674,8 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
   <button onclick="showView('stats')" id="nav-stats"><span class="icon">📈</span>Stats</button>
 </nav>
 
-<script src="app.js?v=31"></script>
+<script src="app.js?v=72"></script>
+  <button id="pwa-install-btn" class="pwa-install-btn" style="display:none;" onclick="triggerPwaInstall()">⬇️ Install App</button>
+  <button id="floating-admin-gear" class="floating-admin-gear" onclick="enterAdminConsole()" aria-label="Admin Console">⚙️</button>
 </body>
 </html>

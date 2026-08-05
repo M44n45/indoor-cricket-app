@@ -1,3 +1,28 @@
+const API = '/api';
+let state = {
+  players: [], matchId: null, inningsId: null,
+  swipeQueue: [], swipeIndex: 0, teamAIds: [], teamBIds: [],
+  pendingExtraType: null,
+  appMode: null, watchPollInterval: null, watchMatchId: null, watchInningsId: null, watchMatch: null,
+  inningsCompletionHandled: false, overCompletedPendingBowlerChoice: null, lastOversCompleted: undefined, matchIsComplete: false
+};
+
+// overs_bowled from the API is in cricket notation (e.g. 3.4 = 3 overs + 4
+// balls, NOT a base-10 decimal). Dividing runs by that value directly
+// undercounts the true overs bowled whenever balls-into-the-over is nonzero,
+// so economy must go through this conversion first.
+function trueOvers(cricketOvers) {
+  const n = parseFloat(cricketOvers) || 0;
+  const oversInt = Math.floor(n);
+  const balls = Math.round((n - oversInt) * 10);
+  return oversInt + balls / 6;
+}
+
+function calcEconomy(runsConceded, cricketOvers) {
+  const overs = trueOvers(cricketOvers);
+  return overs > 0 ? (runsConceded / overs).toFixed(2) : '0.00';
+}
+
 
 function updateTeamCountChips() {
   const a = document.getElementById('team-a-count-chip');
@@ -84,6 +109,8 @@ function enterScorerMode() {
   document.getElementById('watch-view').style.display = 'none';
   document.getElementById('main-tabbar').style.display = 'flex';
   document.getElementById('share-watch-btn').style.display = state.matchId ? 'block' : 'none';
+  const gear = document.getElementById('floating-admin-gear');
+  if (gear) gear.style.display = 'none';
   showView('setup');
   loadPlayers();
 }
@@ -114,16 +141,22 @@ function enterWatchMode() {
 function backToModeSelect() {
   if (state.watchPollInterval) clearInterval(state.watchPollInterval);
   state.appMode = null;
+  state.adminOpen = false;
   document.getElementById('watch-view').style.display = 'none';
   document.getElementById('setup-view').style.display = 'none';
   document.getElementById('score-view').style.display = 'none';
   document.getElementById('leaderboard-view').style.display = 'none';
   document.getElementById('stats-view').style.display = 'none';
+  const av = document.getElementById('admin-view');
+  if (av) { av.style.display = 'none'; av.innerHTML = ''; }
+  const gear = document.getElementById('floating-admin-gear');
+  if (gear) gear.style.display = 'block';
   document.getElementById('main-tabbar').style.display = 'none';
   document.getElementById('share-watch-btn').style.display = 'none';
   document.getElementById('topbar-title').innerText = 'Cricket Scorer';
   document.getElementById('mode-select-view').style.display = 'block';
 }
+
 
 async function promptWatchMatchSelection() {
   const urlParams = new URLSearchParams(window.location.search);
@@ -137,42 +170,74 @@ async function promptWatchMatchSelection() {
   }
   const res = await fetch(`${API}/matches`);
   const matches = await res.json();
-  const inProgress = matches
-    .filter(m => m.status === 'in_progress')
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  if (inProgress.length === 0) {
+  const liveMatches = matches.filter(m => m.status === 'in_progress').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  if (liveMatches.length === 0) {
     document.getElementById('watch-view').innerHTML = `<div class="card" style="margin-top:60px; text-align:center;"><p class="helper-text" style="text-align:center;">No match is currently in progress. Ask the scorer to start one, or check back soon.</p></div>`;
     return;
   }
-  if (inProgress.length === 1) {
-    state.watchMatchId = inProgress[0].id;
-    await resolveWatchInnings();
-    startWatchPolling();
-    return;
-  }
-  // Multiple matches in progress at once - let the viewer explicitly pick which
-  // game to watch by name, instead of guessing and possibly showing a stale game.
+  const cards = await Promise.all(liveMatches.map(async (m) => {
+    let score = 'Starting';
+    let overs = '';
+    let liveLine = '';
+    try {
+      const inningsRes = await fetch(`${API}/matches/${m.id}/current-innings`);
+      const innings = inningsRes.ok ? await inningsRes.json() : null;
+      if (innings) {
+        const wkts = innings.total_wickets ?? innings.wickets ?? 0;
+        const runs = innings.total_runs ?? innings.runs ?? 0;
+        const ov = innings.overs_completed ?? innings.overs ?? 0;
+        score = `${runs}/${wkts}`;
+        overs = `${ov} ov`;
+        liveLine = innings.innings_no === 2 ? 'Chase in progress' : 'Live score';
+      }
+    } catch (e) {}
+    const title = m.match_name || `${m.team_a_name} vs ${m.team_b_name}`;
+    const teamA = m.team_a_name || 'Team A';
+    const teamB = m.team_b_name || 'Team B';
+    const aColor = teamColorCss(teamA, '#ef4444');
+    const bColor = teamColorCss(teamB, '#3b82f6');
+    return `
+      <button class="watch-match-card" onclick="openWatchMatch(${m.id})">
+        <div class="watch-card-top">
+          <div class="watch-team-stack">
+            <div class="watch-team-row"><span class="watch-team-dot" style="background:${aColor}"></span><span class="watch-team-name">${teamA}</span></div>
+            <div class="watch-team-row"><span class="watch-team-dot" style="background:${bColor}"></span><span class="watch-team-name">${teamB}</span></div>
+          </div>
+          <div class="watch-score-stack">
+            <div class="watch-card-score">${score}</div>
+            <div class="watch-card-overs">${overs}</div>
+          </div>
+        </div>
+        <div class="watch-card-title">${title}</div>
+        <div class="watch-card-bottom">${liveLine || 'Tap to view live score'}</div>
+      </button>`;
+  }));
   document.getElementById('watch-view').innerHTML = `
-    <div class="card" style="margin-top:40px;">
-      <h2>Which match would you like to watch?</h2>
-      <p class="helper-text">Multiple matches are currently in progress.</p>
-      <select id="watch-match-picker" class="field">
-        ${inProgress.map(m => {
-          const baseName = m.match_name || (m.team_a_name + ' vs ' + m.team_b_name);
-          const when = new Date(m.created_at);
-          const stamp = when.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-          return `<option value="${m.id}">${baseName} — ${stamp}</option>`;
-        }).join('')}
-      </select>
-      <button class="btn btn-primary btn-full" onclick="confirmWatchMatchPick()">Watch This Match</button>
+    <div class="card" style="margin-top:24px;">
+      <h2>Live Matches</h2>
+      <p class="helper-text">Tap any match card to open the detailed live view.</p>
+      <div class="watch-card-grid">${cards.join('')}</div>
     </div>`;
 }
 
+function openWatchMatch(matchId) {
+  state.watchMatchId = parseInt(matchId);
+  state.watchInningsId = null;
+  const url = new URL(window.location.href);
+  url.searchParams.set('match', matchId);
+  history.replaceState({}, '', url.toString());
+  resolveWatchInnings().then(() => startWatchPolling());
+}
+
+
 async function confirmWatchMatchPick() {
   const picked = document.getElementById('watch-match-picker').value;
+  state.watchMatchId = parseInt(picked);
+  state.watchInningsId = null;
   const url = new URL(window.location.href);
   url.searchParams.set('match', picked);
-  window.location.href = url.toString();
+  history.replaceState({}, '', url.toString());
+  resolveWatchInnings().then(() => startWatchPolling());
 }
 
 async function resolveWatchInnings() {
@@ -193,93 +258,212 @@ function startWatchPolling() {
   state.watchPollInterval = setInterval(refreshWatchScorecard, 4000);
 }
 
-async function refreshWatchScorecard() {
-  if (!state.watchInningsId) {
-    await resolveWatchInnings();
-    if (!state.watchInningsId) return;
-  } else {
-    const latestRes = await fetch(`${API}/matches/${state.watchMatchId}/current-innings`);
-    if (latestRes.ok) {
-      const latestInnings = await latestRes.json();
-      if (latestInnings && latestInnings.id !== state.watchInningsId) {
-        state.watchInningsId = latestInnings.id;
-        document.getElementById('watch-target-row').style.display = 'none';
-        document.getElementById('watch-first-innings-row').style.display = 'none';
-      }
-    }
+
+
+function ensureWatchScorecardShell() {
+  const view = document.getElementById('watch-view');
+  if (!view) return false;
+  const required = ['watch-select-other-match-btn','watch-batting-team','watch-overs-limit','watch-score','watch-overs','watch-crr','watch-striker-name','watch-striker-stats','watch-bowler-name','watch-bowler-stats','watch-this-over-balls','watch-overs-recap','watch-batting-table','watch-bowling-table'];
+  const existing = required.every(id => document.getElementById(id));
+  if (!existing) {
+    view.innerHTML = `
+      <div class="scoreboard">
+        <button id="watch-select-other-match-btn" class="btn btn-secondary btn-full" style="margin-bottom:10px; display:block;" onclick="backToWatchMatchList()">Select Other Match</button>
+        <div id="watch-winner-banner" style="display:none; background:rgba(255,255,255,0.2); border-radius:10px; padding:10px 12px; margin-bottom:8px; font-weight:700; text-align:center;"></div>
+        <div class="teams"><span id="watch-batting-team">Team A</span><span id="watch-players-count"></span><span id="watch-overs-limit"></span></div>
+        <div class="runs" id="watch-score">0/0</div>
+        <div class="meta"><span id="watch-overs">0.0 ov</span><span class="crr" id="watch-crr">CRR 0.00</span></div>
+        <div class="target-row" id="watch-target-row" style="display:none; font-size:13px; margin-top:4px; opacity:0.9;">
+          Need <span id="watch-need-runs">0</span> off <span id="watch-need-balls">0</span> balls &middot; RRR <span id="watch-rrr">0.00</span>
+        </div>
+        <div class="striker-score-row" id="watch-striker-row" style="margin-top:10px; background:rgba(255,255,255,0.15); border-radius:10px; padding:8px 12px;">
+          <span id="watch-striker-name" style="font-weight:600; font-size:15px;">-</span>
+          <span id="watch-striker-stats" style="float:right; font-size:15px;">0 (0) SR 0.0</span>
+        </div>
+        <div class="bowler-score-row" id="watch-bowler-row" style="margin-top:6px; background:rgba(255,255,255,0.1); border-radius:10px; padding:6px 12px; font-size:13px;">
+          <span id="watch-bowler-name">-</span>
+          <span id="watch-bowler-stats" style="float:right;">0-0 (0.0)</span>
+        </div>
+        <div class="first-innings-row" id="watch-first-innings-row" style="display:none; margin-top:6px; font-size:12.5px; opacity:0.85;">
+          <span id="watch-first-innings-label">Team A</span>: <span id="watch-first-innings-score">0/0</span>
+        </div>
+      </div>
+      <div class="card"><h2>This Over</h2><div class="balls-row" id="watch-this-over-balls"></div></div>
+      <div class="card"><h2>Ball by Ball Recap</h2><div class="over-recap-container" id="watch-overs-recap"></div></div>
+      <div class="card"><h2>Batting</h2><table id="watch-batting-table"><thead><tr><th>Batsman</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody></tbody></table></div>
+      <div class="card"><h2>Bowling</h2><table id="watch-bowling-table"><thead><tr><th>Bowler</th><th>O</th><th>R</th><th>W</th></tr></thead><tbody></tbody></table></div>
+      <div class="card"><h2>Fall of Wickets</h2><div id="watch-fow" style="font-size:12px; color:var(--sub); line-height:1.6;"></div></div>
+      <div class="card" id="watch-back-to-list-card" style="display:none; text-align:center;">
+        <button class="btn btn-primary btn-full" onclick="backToWatchMatchList()">Watch Another Match</button>
+      </div>
+    `;
   }
-  const res = await fetch(`${API}/innings/${state.watchInningsId}/scorecard`);
-  const data = await res.json();
-  const match = state.watchMatch || {};
-  const teamName = data.innings.batting_team === 'A' ? match.team_a_name : match.team_b_name;
-
-  document.getElementById('watch-batting-team').innerText = teamName || 'Batting Team';
-  document.getElementById('watch-overs-limit').innerText = match.overs_limit ? `${match.overs_limit} ov limit` : '';
-  document.getElementById('watch-score').innerText = `${data.innings.total_runs}/${data.innings.total_wickets}`;
-  document.getElementById('watch-overs').innerText = `${parseFloat(data.innings.overs_completed).toFixed(1)} ov`;
-  const crr = data.innings.overs_completed > 0 ? (data.innings.total_runs / parseFloat(data.innings.overs_completed)).toFixed(2) : '0.00';
-  document.getElementById('watch-crr').innerText = `CRR ${crr}`;
-
-  const watchStriker = data.batting.find(b => b.player_id === data.innings.striker_id);
-  if (watchStriker) {
-    const wSr = watchStriker.balls_faced > 0 ? ((watchStriker.runs / watchStriker.balls_faced) * 100).toFixed(1) : '0.0';
-    document.getElementById('watch-striker-name').innerText = watchStriker.name;
-    document.getElementById('watch-striker-stats').innerText = `${watchStriker.runs} (${watchStriker.balls_faced}) SR ${wSr}`;
-  }
-
-  const watchBowler = data.bowling.find(b => b.player_id === data.innings.bowler_id);
-  if (watchBowler) {
-    document.getElementById('watch-bowler-name').innerText = watchBowler.name;
-    document.getElementById('watch-bowler-stats').innerText = `${watchBowler.wickets}-${watchBowler.runs_conceded} (${parseFloat(watchBowler.overs_bowled).toFixed(1)})`;
-  }
-
-  const watchTargetRow = document.getElementById('watch-target-row');
-  const watchFirstInningsRow = document.getElementById('watch-first-innings-row');
-  if (data.first_innings) {
-    document.getElementById('watch-first-innings-label').innerText = data.first_innings.team_name || 'Team';
-    document.getElementById('watch-first-innings-score').innerText = `${data.first_innings.total_runs}/${data.first_innings.total_wickets}`;
-    watchFirstInningsRow.style.display = 'block';
-
-    const oversLimit = match.overs_limit || 0;
-    const oversNumW = parseFloat(data.innings.overs_completed) || 0;
-    const ballsBowledW = Math.floor(oversNumW) * 6 + Math.round((oversNumW % 1) * 10);
-    const totalBallsW = Math.round(oversLimit * 6);
-    const ballsLeftW = Math.max(totalBallsW - ballsBowledW, 0);
-    const oversLeftW = (ballsLeftW / 6).toFixed(1);
-    const runsNeededW = Math.max(data.first_innings.target - data.innings.total_runs, 0);
-    const rrrW = ballsLeftW > 0 ? (runsNeededW / (ballsLeftW / 6)).toFixed(2) : '0.00';
-    document.getElementById('watch-need-runs').innerText = runsNeededW;
-    document.getElementById('watch-need-balls').innerText = `${ballsLeftW} balls (${oversLeftW} ov)`;
-    document.getElementById('watch-rrr').innerText = rrrW;
-    watchTargetRow.style.display = 'block';
-  } else {
-    if (watchTargetRow) watchTargetRow.style.display = 'none';
-    if (watchFirstInningsRow) watchFirstInningsRow.style.display = 'none';
-  }
-
-  document.querySelector('#watch-batting-table tbody').innerHTML = data.batting.map(b => `
-    <tr><td>${b.name}${b.status === 'out' ? '' : b.status === 'batting' ? ' *' : ''}</td><td>${b.runs}</td><td>${b.balls_faced}</td><td>${b.fours}</td><td>${b.sixes}</td>
-    <td>${b.balls_faced > 0 ? Math.round(b.runs / b.balls_faced * 100) : 0}</td></tr>`).join('');
-
-  document.querySelector('#watch-bowling-table tbody').innerHTML = data.bowling.map(bw => `
-    <tr><td>${bw.name}</td><td>${bw.overs_bowled}</td><td>${bw.runs_conceded}</td><td>${bw.wickets}</td></tr>`).join('');
-
-  document.getElementById('watch-fow').innerHTML = data.fall_of_wickets.map(f =>
-    `${f.team_score_at_fall}-${f.wicket_no} (${f.name}, ${f.over_at_fall} ov)`).join(' &nbsp;•&nbsp; ') || 'No wickets yet';
-
-  const oversInt = Math.floor(parseFloat(data.innings.overs_completed));
-  const ballsRes = await fetch(`${API}/innings/${state.watchInningsId}/over/${oversInt}/balls`);
-  const balls = await ballsRes.json();
-  document.getElementById('watch-this-over-balls').innerHTML = balls.map(b => {
-    let cls = 'runs', label = String(b.runs);
-    if (b.is_wicket) { cls = 'wicket'; label = 'W'; }
-    else if (b.extra_type === 'wide') { cls = 'extra'; label = 'Wd'; }
-    else if (b.extra_type === 'no_ball') { cls = 'extra'; label = `${b.runs}nb`; }
-    else if (b.runs === 4) { cls = 'four'; }
-    else if (b.runs === 6) { cls = 'six'; }
-    return `<div class="ball-pill ${cls}">${label}</div>`;
-  }).join('') || '<span style="font-size:12px; color:var(--sub);">Over in progress</span>';
+  return true;
 }
+function renderWatchBallByBall(events) {
+  const el = document.getElementById('watch-ball-by-ball');
+  if (!el) return;
+  if (!events || !events.length) {
+    el.innerHTML = '<p class="helper-text">No balls recorded yet.</p>';
+    return;
+  }
+  el.innerHTML = events.slice(-12).reverse().map(e => `<div class="ball-chip">${e.label || e.runs || ''}</div>`).join('');
+}
+
+async function refreshWatchScorecard() {
+  if (!state.watchMatchId) return;
+  if (!ensureWatchScorecardShell()) return;
+  const matchRes = await fetch(`${API}/matches/${state.watchMatchId}`);
+  if (!matchRes.ok) return;
+  const matchFresh = await matchRes.json();
+  state.watchMatch = matchFresh;
+
+  const banner = document.getElementById('watch-winner-banner');
+  const selectBtn = document.getElementById('watch-select-other-match-btn');
+  const backCard = document.getElementById('watch-back-to-list-card');
+  const battingTeamEl = document.getElementById('watch-batting-team');
+  const oversLimitEl = document.getElementById('watch-overs-limit');
+  const scoreEl = document.getElementById('watch-score');
+  const oversEl = document.getElementById('watch-overs');
+  const crrEl = document.getElementById('watch-crr');
+  const strikerNameEl = document.getElementById('watch-striker-name');
+  const strikerStatsEl = document.getElementById('watch-striker-stats');
+  const bowlerNameEl = document.getElementById('watch-bowler-name');
+  const bowlerStatsEl = document.getElementById('watch-bowler-stats');
+  const thisOverEl = document.getElementById('watch-this-over-balls');
+  const battingBody = document.querySelector('#watch-batting-table tbody');
+  const bowlingBody = document.querySelector('#watch-bowling-table tbody');
+  const fowEl = document.getElementById('watch-fow');
+  const oversRecapEl = document.getElementById('watch-overs-recap');
+  const targetRow = document.getElementById('watch-target-row');
+  const needRunsEl = document.getElementById('watch-need-runs');
+  const needBallsEl = document.getElementById('watch-need-balls');
+  const rrrEl = document.getElementById('watch-rrr');
+  const firstInningsRow = document.getElementById('watch-first-innings-row');
+  const firstInningsLabel = document.getElementById('watch-first-innings-label');
+  const firstInningsScore = document.getElementById('watch-first-innings-score');
+
+  if (selectBtn) selectBtn.style.display = 'block';
+
+  if (matchFresh.status === 'completed' || matchFresh.status === 'abandoned') {
+    if (banner) {
+      let msg = 'Match ended';
+      if (matchFresh.status === 'abandoned') msg = 'Match abandoned';
+      else if (matchFresh.winner_team === 'A') msg = `${matchFresh.team_a_name} won`;
+      else if (matchFresh.winner_team === 'B') msg = `${matchFresh.team_b_name} won`;
+      else if (matchFresh.winner_team === 'tie') msg = 'Match tied';
+      banner.innerText = msg;
+      banner.style.display = 'block';
+    }
+    if (backCard) backCard.style.display = 'block';
+    if (state.watchPollInterval) { clearInterval(state.watchPollInterval); state.watchPollInterval = null; }
+    return;
+  }
+
+  const inningsRes = await fetch(`${API}/matches/${state.watchMatchId}/current-innings`);
+  if (!inningsRes.ok) return;
+  const currentInnings = await inningsRes.json();
+  state.watchInningsId = currentInnings ? currentInnings.id : null;
+  if (!state.watchInningsId) return;
+
+  const res = await fetch(`${API}/innings/${state.watchInningsId}/scorecard`);
+  if (!res.ok) return;
+  const data = await res.json();
+  const innings = data.innings || {};
+  const batting = Array.isArray(data.batting) ? data.batting : [];
+  const bowling = Array.isArray(data.bowling) ? data.bowling : [];
+  const fow = Array.isArray(data.fall_of_wickets) ? data.fall_of_wickets : [];
+  const oversRecap = Array.isArray(data.overs_recap) ? data.overs_recap : [];
+  const match = state.watchMatch || {};
+  const runs = Number(innings.total_runs || 0);
+  const wickets = Number(innings.total_wickets || 0);
+  const oversCompleted = Number(innings.overs_completed || 0);
+  const crr = oversCompleted > 0 ? (runs / oversCompleted).toFixed(2) : '0.00';
+
+  if (battingTeamEl) battingTeamEl.innerText = innings.batting_team === 'A' ? (match.team_a_name || 'Team A') : (match.team_b_name || 'Team B');
+  if (oversLimitEl) oversLimitEl.innerText = match.overs_limit ? `${match.overs_limit} ov limit` : '';
+  if (scoreEl) scoreEl.innerText = `${runs}/${wickets}`;
+  if (oversEl) oversEl.innerText = `${oversCompleted.toFixed(1)} ov`;
+  if (crrEl) crrEl.innerText = `CRR ${crr}`;
+
+  const striker = batting.find(p => p.player_id === innings.striker_id);
+  if (striker) {
+    const sr = striker.balls_faced > 0 ? ((striker.runs / striker.balls_faced) * 100).toFixed(1) : '0.0';
+    if (strikerNameEl) strikerNameEl.innerText = striker.name;
+    if (strikerStatsEl) strikerStatsEl.innerText = `${striker.runs} (${striker.balls_faced}) SR ${sr}`;
+  } else {
+    if (strikerNameEl) strikerNameEl.innerText = '-';
+    if (strikerStatsEl) strikerStatsEl.innerText = '0 (0) SR 0.0';
+  }
+
+  const bowler = bowling.find(p => p.player_id === innings.bowler_id);
+  if (bowler) {
+    if (bowlerNameEl) bowlerNameEl.innerText = bowler.name;
+    if (bowlerStatsEl) bowlerStatsEl.innerText = `${bowler.wickets}-${bowler.runs_conceded} (${bowler.overs_bowled})`;
+  } else {
+    if (bowlerNameEl) bowlerNameEl.innerText = '-';
+    if (bowlerStatsEl) bowlerStatsEl.innerText = '0-0 (0.0)';
+  }
+
+  if (innings.innings_no === 2 && (match.first_innings_runs != null || data.first_innings)) {
+    const fi = data.first_innings || {};
+    if (firstInningsRow) firstInningsRow.style.display = 'block';
+    if (firstInningsLabel) firstInningsLabel.innerText = fi.batting_team_name || fi.team_name || 'First Innings';
+    if (firstInningsScore) firstInningsScore.innerText = `${fi.total_runs ?? match.first_innings_runs ?? 0}/${fi.total_wickets ?? match.first_innings_wickets ?? 0}`;
+    if (targetRow) targetRow.style.display = 'block';
+    const target = Number(fi.total_runs ?? match.first_innings_runs ?? 0) + 1;
+    const needRuns = Math.max(target - runs, 0);
+    const ballsLeft = Math.max((Number(match.overs_limit || 0) * 6) - Math.round(oversCompleted * 6), 0);
+    if (needRunsEl) needRunsEl.innerText = String(needRuns);
+    if (needBallsEl) needBallsEl.innerText = String(ballsLeft);
+    if (rrrEl) rrrEl.innerText = ballsLeft > 0 ? (needRuns / (ballsLeft / 6)).toFixed(2) : '0.00';
+  } else {
+    if (firstInningsRow) firstInningsRow.style.display = 'none';
+    if (targetRow) targetRow.style.display = 'none';
+  }
+
+  const latestOver = oversRecap.length > 0 ? oversRecap[oversRecap.length - 1] : null;
+  if (thisOverEl) thisOverEl.innerHTML = (latestOver ? latestOver.balls : []).map(b => `<div class="ball-chip">${b.display}</div>`).join('') || '<p class="helper-text">No balls recorded yet.</p>';
+  if (battingBody) battingBody.innerHTML = batting.map(p => `<tr><td>${p.name}</td><td>${p.runs}</td><td>${p.balls_faced}</td><td>${p.fours}</td><td>${p.sixes}</td><td>${p.balls_faced > 0 ? ((p.runs / p.balls_faced) * 100).toFixed(1) : '0.0'}</td></tr>`).join('') || '<tr><td colspan="6">No batting data</td></tr>';
+  if (bowlingBody) bowlingBody.innerHTML = bowling.map(p => `<tr><td>${p.name}</td><td>${p.overs_bowled}</td><td>${p.runs_conceded}</td><td>${p.wickets}</td></tr>`).join('') || '<tr><td colspan="4">No bowling data</td></tr>';
+  if (fowEl) fowEl.innerHTML = fow.map(f => `${f.wicket_no ?? ''}-${f.team_score_at_fall ?? ''} (${f.name || 'unknown'}, ${f.over_at_fall != null ? Number(f.over_at_fall).toFixed(1) : '0.0'} ov)`).join('<br>') || '<p class="helper-text">No wickets yet.</p>';
+  if (oversRecapEl) {
+    oversRecapEl.innerHTML = oversRecap.slice().reverse().map(over => {
+      const pills = over.balls.map(b => {
+        const isBoundary = b.runs === 4 || b.runs === 6;
+        const cls = b.is_wicket ? 'ball-pill wicket' : (isBoundary ? 'ball-pill boundary' : 'ball-pill');
+        return `<span class="${cls}">${b.display}</span>`;
+      }).join('');
+      return `
+        <div class="over-recap-row">
+          <div class="over-recap-header">
+            <span>Over ${over.over_no + 1} — <b>${over.bowler_name}</b> to ${over.batsman_name}</span>
+            <span class="over-recap-total">${over.runs} Runs, ${over.wickets} Wkt</span>
+          </div>
+          <div class="over-recap-balls">${pills}</div>
+        </div>`;
+    }).join('') || '<p class="helper-text">No balls recorded yet.</p>';
+  }
+}
+function backToWatchMatchList() {
+  state.watchMatchId = null;
+  state.watchInningsId = null;
+  state.watchMatch = null;
+  if (state.watchPollInterval) { clearInterval(state.watchPollInterval); state.watchPollInterval = null; }
+  const banner = document.getElementById('watch-winner-banner');
+  const backCard = document.getElementById('watch-back-to-list-card');
+  const watchAnotherBtn = document.getElementById('watch-another-match-btn');
+  if (banner) banner.style.display = 'none';
+  if (backCard) backCard.style.display = 'none';
+  if (watchAnotherBtn) watchAnotherBtn.style.display = 'none';
+  const url = new URL(window.location.href);
+  url.searchParams.delete('match');
+  history.replaceState({}, '', url.toString());
+  const view = document.getElementById('watch-view');
+  if (view) view.innerHTML = '<div class="card" style="margin-top:24px; text-align:center;"><p class="helper-text" style="text-align:center;">Loading live matches...</p></div>';
+  promptWatchMatchSelection();
+}
+
 
 function shareWatchLink() {
   if (!state.matchId) { alert('Start a match first.'); return; }
@@ -292,19 +476,234 @@ function shareWatchLink() {
   }
 }
 
+
+function teamColorCss(name, fallback) {
+  const map = {
+    red: '#ef4444', blue: '#3b82f6', green: '#22c55e', yellow: '#eab308', orange: '#f97316', purple: '#a855f7', pink: '#ec4899', teal: '#14b8a6', indigo: '#6366f1', amber: '#f59e0b'
+  };
+  const key = String(name || '').trim().toLowerCase();
+  return map[key] || fallback || '#64748b';
+}
+
+function backToModeSelectFromWatch() {
+  if (state.watchPollInterval) { clearInterval(state.watchPollInterval); state.watchPollInterval = null; }
+  state.watchMatchId = null;
+  state.watchInningsId = null;
+  state.watchMatch = null;
+    const banner = document.getElementById('watch-winner-banner');
+  const backBtn = document.getElementById('back-to-landing-btn');
+  if (banner) banner.style.display = 'none';
+  if (backBtn) backBtn.style.display = 'none';
+  backToModeSelect();
+}
+
+function enterAdminConsole() {
+  state.appMode = 'admin';
+  document.getElementById('mode-select-view').style.display = 'none';
+  document.getElementById('watch-view').style.display = 'none';
+  document.getElementById('main-tabbar').style.display = 'none';
+  document.getElementById('share-watch-btn').style.display = 'none';
+  document.getElementById('setup-view').style.display = 'none';
+  document.getElementById('score-view').style.display = 'none';
+  document.getElementById('leaderboard-view').style.display = 'none';
+  document.getElementById('stats-view').style.display = 'none';
+  const av = document.getElementById('admin-view');
+  if (av) av.style.display = 'block';
+  const gear = document.getElementById('floating-admin-gear');
+  if (gear) gear.style.display = 'none';
+  document.getElementById('topbar-title').innerText = 'Admin Console';
+  checkAdminAuth();
+}
+
+// Gate the admin console behind a password. First-ever visit: ask the user to
+// set one. Afterwards: ask for it, once per browser session (token cached in
+// sessionStorage so re-opening the console mid-session doesn't re-prompt).
+async function checkAdminAuth() {
+  const cachedToken = sessionStorage.getItem('adminToken');
+  if (cachedToken) {
+    state.adminToken = cachedToken;
+    loadAdminConsole();
+    return;
+  }
+  const res = await fetch(`${API}/admin/status`);
+  const data = await res.json();
+  if (data.configured) {
+    renderAdminLoginForm();
+  } else {
+    renderAdminSetupForm();
+  }
+}
+
+function renderAdminSetupForm() {
+  const av = document.getElementById('admin-view');
+  if (!av) return;
+  av.innerHTML = `
+    <div class="card" style="margin-top:24px; max-width:360px; margin-left:auto; margin-right:auto;">
+      <h2>Set Admin Password</h2>
+      <p class="helper-text">This is your first time opening the admin console. Choose a password to protect it going forward.</p>
+      <input type="password" id="admin-setup-password" placeholder="New password" style="width:100%; margin-top:10px; padding:10px; border-radius:8px; border:1px solid #ddd; box-sizing:border-box;">
+      <input type="password" id="admin-setup-password-confirm" placeholder="Confirm password" style="width:100%; margin-top:10px; padding:10px; border-radius:8px; border:1px solid #ddd; box-sizing:border-box;">
+      <div id="admin-setup-error" style="color:#dc2626; font-size:12.5px; margin-top:6px; display:none;"></div>
+      <button class="btn btn-primary btn-full" style="margin-top:12px;" onclick="submitAdminSetup()">Set Password</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="backToModeSelect()">Cancel</button>
+    </div>`;
+  const input = document.getElementById('admin-setup-password-confirm');
+  if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAdminSetup(); });
+}
+
+async function submitAdminSetup() {
+  const pwEl = document.getElementById('admin-setup-password');
+  const pwConfirmEl = document.getElementById('admin-setup-password-confirm');
+  const errEl = document.getElementById('admin-setup-error');
+  const showError = (msg) => { if (errEl) { errEl.innerText = msg; errEl.style.display = 'block'; } };
+  const pw = pwEl ? pwEl.value : '';
+  const pwConfirm = pwConfirmEl ? pwConfirmEl.value : '';
+  if (!pw || pw.length < 4) { showError('Password must be at least 4 characters.'); return; }
+  if (pw !== pwConfirm) { showError('Passwords do not match.'); return; }
+  const res = await fetch(`${API}/admin/setup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }) });
+  const data = await res.json();
+  if (!res.ok) { showError(data.error || 'Could not set password.'); return; }
+  state.adminToken = data.token;
+  sessionStorage.setItem('adminToken', data.token);
+  loadAdminConsole();
+}
+
+function renderAdminLoginForm() {
+  const av = document.getElementById('admin-view');
+  if (!av) return;
+  av.innerHTML = `
+    <div class="card" style="margin-top:24px; max-width:360px; margin-left:auto; margin-right:auto;">
+      <h2>Admin Login</h2>
+      <p class="helper-text">Enter the admin password to continue.</p>
+      <input type="password" id="admin-login-password" placeholder="Password" style="width:100%; margin-top:10px; padding:10px; border-radius:8px; border:1px solid #ddd; box-sizing:border-box;">
+      <div id="admin-login-error" style="color:#dc2626; font-size:12.5px; margin-top:6px; display:none;"></div>
+      <button class="btn btn-primary btn-full" style="margin-top:12px;" onclick="submitAdminLogin()">Unlock</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="backToModeSelect()">Cancel</button>
+    </div>`;
+  const input = document.getElementById('admin-login-password');
+  if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAdminLogin(); });
+}
+
+async function submitAdminLogin() {
+  const pwEl = document.getElementById('admin-login-password');
+  const errEl = document.getElementById('admin-login-error');
+  const res = await fetch(`${API}/admin/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pwEl ? pwEl.value : '' }) });
+  const data = await res.json();
+  if (!res.ok) {
+    if (errEl) { errEl.innerText = data.error || 'Incorrect password.'; errEl.style.display = 'block'; }
+    return;
+  }
+  state.adminToken = data.token;
+  sessionStorage.setItem('adminToken', data.token);
+  loadAdminConsole();
+}
+
+
+async function loadAdminConsole() {
+  const res = await fetch(`${API}/matches`);
+  const matches = await res.json();
+  const rows = matches.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map(m => {
+    const title = m.match_name || `${m.team_a_name} vs ${m.team_b_name}`;
+    return `<div class="card" style="margin-bottom:10px;">
+      <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+        <div>
+          <div style="font-weight:800;">${title}</div>
+          <div class="helper-text">Status: <b>${m.status}</b></div>
+        </div>
+        <button class="btn btn-primary" onclick="markMatchCompleted(${m.id})">Mark Completed</button><button class="btn btn-secondary" style="margin-left:8px;" onclick="deleteMatch(${m.id})">Delete</button>${m.status==='in_progress' ? `<button class="btn btn-secondary" style="margin-left:8px;" onclick="continueScoring(${m.id})">Continue Scoring</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+  const gear = document.getElementById('floating-admin-gear');
+  if (gear) gear.style.display = 'none';
+  document.getElementById('admin-view').innerHTML = `<div class="card" style="margin-top:24px;"><div style="display:flex; justify-content:space-between; align-items:center; gap:12px;"><div><h2>Existing Matches</h2><p class="helper-text">Use this to force-match completion when needed.</p></div><button class="btn btn-secondary" onclick="backToModeSelect()">Back</button></div>${rows || '<p class="helper-text">No matches found.</p>'}</div>`;
+}
+
+async function markMatchCompleted(matchId) {
+  await fetch(`${API}/matches/${matchId}/complete`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ winner_team: 'tie', result_summary: 'Marked completed from admin console' }) });
+  await loadAdminConsole();
+}
+
+
+
+async function continueScoring(matchId) {
+  state.matchId = matchId;
+  state.appMode = 'scorer';
+  if (state.watchPollInterval) { clearInterval(state.watchPollInterval); state.watchPollInterval = null; }
+  const av = document.getElementById('admin-view');
+  if (av) { av.style.display = 'none'; av.innerHTML = ''; }
+  const gear = document.getElementById('floating-admin-gear');
+  if (gear) gear.style.display = 'none';
+  document.getElementById('mode-select-view').style.display = 'none';
+  document.getElementById('main-tabbar').style.display = 'flex';
+  document.getElementById('share-watch-btn').style.display = 'block';
+  const matchRes = await fetch(`${API}/matches/${matchId}`);
+  if (matchRes.ok) {
+    const match = await matchRes.json();
+    state.matchId = match.id;
+    state.teamAIds = state.teamAIds || [];
+    state.teamBIds = state.teamBIds || [];
+    document.getElementById('team-a-name').value = match.team_a_name || document.getElementById('team-a-name').value || 'Team A';
+    document.getElementById('team-b-name').value = match.team_b_name || document.getElementById('team-b-name').value || 'Team B';
+    document.getElementById('match-name').value = match.match_name || '';
+    document.getElementById('overs-limit').value = match.overs_limit || document.getElementById('overs-limit').value || 10;
+    document.getElementById('retirement-overs').value = match.retirement_overs || document.getElementById('retirement-overs').value || 5;
+    await loadPlayers();
+    const rosterRes = await fetch(`${API}/matches/${matchId}/players`);
+    if (rosterRes.ok) {
+      const roster = await rosterRes.json();
+      state.teamAIds = roster.team_a_player_ids || [];
+      state.teamBIds = roster.team_b_player_ids || [];
+      state.commonPlayerIds = roster.common_player_ids || [];
+      state.attendingIds = new Set([...state.teamAIds, ...state.teamBIds, ...state.commonPlayerIds]);
+      renderAttendanceList();
+      renderAssignTapList();
+    }
+    const inningsRes = await fetch(`${API}/matches/${matchId}/current-innings`);
+    if (inningsRes.ok) {
+      const innings = await inningsRes.json();
+      if (innings && innings.id) {
+        state.inningsId = innings.id;
+        state.currentBattingTeam = innings.batting_team;
+        state.currentBowlingTeamIds = (innings.bowling_team === 'A' ? state.teamAIds : state.teamBIds).concat(state.commonPlayerIds || []);
+        const battingName = innings.batting_team === 'A' ? (match.team_a_name || 'Team A') : (match.team_b_name || 'Team B');
+        document.getElementById('sb-batting-team').innerText = battingName;
+        document.getElementById('sb-players-count').innerText = `(${innings.batting_team === 'A' ? (state.teamAIds||[]).length : (state.teamBIds||[]).length} players)`;
+        showView('score');
+        await refreshScorecard(true);
+        return;
+      }
+    }
+  }
+  showView('setup');
+}
+
+async function deleteMatch(matchId) {
+  if (!confirm('Delete this match? This cannot be undone.')) return;
+  const res = await fetch(`${API}/matches/${matchId}`, { method: 'DELETE', headers: { 'x-admin-token': state.adminToken || '' } });
+  if (res.status === 401) {
+    sessionStorage.removeItem('adminToken');
+    state.adminToken = null;
+    alert('Your admin session has expired. Please log in again.');
+    renderAdminLoginForm();
+    return;
+  }
+  if (res.status === 404) { alert('Match not found — it may have already been deleted.'); await loadAdminConsole(); return; }
+  if (!res.ok) { alert('Delete failed'); return; }
+  await loadAdminConsole();
+}
+
+
+function refreshAdminView() {
+  const av = document.getElementById('admin-view');
+  if (av) av.innerHTML = '';
+}
 function formatDateOnly(dateStr) {
   if (!dateStr) return '';
   return String(dateStr).split('T')[0];
 }
 // public/app.js
-const API = '/api';
-let state = {
-  players: [], matchId: null, inningsId: null,
-  swipeQueue: [], swipeIndex: 0, teamAIds: [], teamBIds: [],
-  pendingExtraType: null
-};
-
-function showView(view) {
+function showView(view, contextMatchId) {
   document.getElementById('setup-view').style.display = view === 'setup' ? 'block' : 'none';
   document.getElementById('score-view').style.display = view === 'score' ? 'block' : 'none';
   document.getElementById('scorecard-view').style.display = view === 'scorecard' ? 'block' : 'none';
@@ -319,17 +718,20 @@ function showView(view) {
   document.getElementById('topbar-title').innerText = titles[view];
   if (view === 'stats') { loadDailyStats(); loadOverallStats(); loadMatchHistory(); }
   if (view === 'leaderboard') { loadLeaderboard(); }
-  if (view === 'scorecard') { loadMatchListForScorecard(); }
+  if (view === 'scorecard') { loadMatchListForScorecard(contextMatchId); }
   window.scrollTo(0, 0);
 }
 
 
-async function loadMatchListForScorecard() {
+async function loadMatchListForScorecard(preferredMatchId) {
   const res = await fetch(`${API}/matches`);
   const matches = await res.json();
   const sel = document.getElementById('scorecard-match-select');
   sel.innerHTML = matches.map(m => `<option value="${m.id}">${m.team_a_name} vs ${m.team_b_name} - ${new Date(m.created_at).toLocaleDateString()}</option>`).join('');
-  if (matches.length > 0) { sel.value = matches[0].id; loadFullScorecard(); }
+  if (matches.length === 0) return;
+  const preferredExists = preferredMatchId != null && matches.some(m => String(m.id) === String(preferredMatchId));
+  sel.value = preferredExists ? preferredMatchId : matches[0].id;
+  loadFullScorecard();
 }
 
 async function loadFullScorecard() {
@@ -345,8 +747,8 @@ async function loadFullScorecard() {
       return `<tr><td>${b.name}${b.status==='retired' ? ' (ret)' : b.status==='out' ? ' (out)' : ''}</td><td>${b.runs}</td><td>${b.balls_faced}</td><td>${b.fours}</td><td>${b.sixes}</td><td>${sr}</td></tr>`;
     }).join('');
     const bowlingRows = inn.bowling.map(b => {
-      const econ = b.overs_bowled > 0 ? (b.runs_conceded / b.overs_bowled).toFixed(2) : '0.00';
-      return `<tr><td>${b.name}</td><td>${b.overs_bowled}</td><td>${b.runs_conceded}</td><td>${b.wickets}</td><td>${econ}</td></tr>`;
+      const econ = calcEconomy(b.runs_conceded, b.overs_bowled);
+      return `<tr><td>${b.name}</td><td>${b.overs_bowled}</td><td>${b.maidens || 0}</td><td>${b.runs_conceded}</td><td>${b.wickets}</td><td>${b.wides || 0}</td><td>${b.no_balls || 0}</td><td>${econ}</td></tr>`;
     }).join('');
     const oversRecapHtml = (inn.overs_recap || []).map(over => {
       const pills = over.balls.map(b => {
@@ -368,7 +770,7 @@ async function loadFullScorecard() {
         <h2>${teamLabel} — Innings ${inn.innings.innings_no} (${inn.innings.total_runs}/${inn.innings.total_wickets}, ${parseFloat(inn.innings.overs_completed).toFixed(1)} ov)</h2>
         <table class="mini-table"><thead><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody>${battingRows}</tbody></table>
         <h3 style="margin-top:10px; font-size:13px; color:var(--sub);">Bowling</h3>
-        <table class="mini-table"><thead><tr><th>Bowler</th><th>O</th><th>R</th><th>W</th><th>Econ</th></tr></thead><tbody>${bowlingRows}</tbody></table>
+        <table class="mini-table"><thead><tr><th>Bowler</th><th>O</th><th>M</th><th>R</th><th>W</th><th>Wd</th><th>Nb</th><th>Econ</th></tr></thead><tbody>${bowlingRows}</tbody></table>
       </div>
       <div class="card">
         <h3 style="margin-top:0; font-size:13px; color:var(--sub);">Ball-by-Ball Recap</h3>
@@ -407,22 +809,101 @@ function switchLeaderboardTab(tab) {
 async function loadMatchHistory() {
   const res = await fetch(`${API}/stats/matches-history`);
   const rows = await res.json();
-  document.querySelector('#history-table tbody').innerHTML = rows.map(r => {
-    const result = r.status === 'completed'
-      ? (r.winner_team === 'tie' ? 'Tie' : `${r.winner_team === 'A' ? r.team_a_name : r.team_b_name} won`)
-      : 'In progress';
-    const label = r.match_name || `${r.team_a_name} vs ${r.team_b_name}`;
-    return `<tr class="clickable-row" onclick="openMatchScorecard(${r.id})"><td>${formatDateOnly(r.match_date)}</td><td>${label}</td><td>${result}</td></tr>`;
-  }).join('');
+  const container = document.getElementById('history-container');
+  if (!container) return;
+  if (!rows || rows.length === 0) {
+    container.innerHTML = '<p class="helper-text">No matches yet.</p>';
+    return;
+  }
+  // Rows already arrive sorted most-recent-first, so grouping into day
+  // buckets while iterating preserves that order for free.
+  const dayGroups = [];
+  const dayIndex = {};
+  for (const r of rows) {
+    if (!dayIndex[r.match_date]) {
+      const group = { date: r.match_date, matches: [] };
+      dayIndex[r.match_date] = group;
+      dayGroups.push(group);
+    }
+    dayIndex[r.match_date].matches.push(r);
+  }
+  const latestDate = dayGroups[0].date;
+  let html = '';
+  let currentMonthKey = null;
+  for (const group of dayGroups) {
+    const dateObj = new Date(group.date + 'T00:00:00');
+    const monthKey = group.date.slice(0, 7);
+    if (monthKey !== currentMonthKey) {
+      currentMonthKey = monthKey;
+      const monthLabel = dateObj.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+      html += `<div class="history-month-header">${monthLabel}</div>`;
+    }
+    const dayLabel = dateObj.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+    const isLatest = group.date === latestDate;
+    html += `
+      <button class="history-day-header${isLatest ? ' expanded' : ''}" onclick="toggleHistoryDay('${group.date}')">
+        <span><span class="history-day-chevron">▶</span> ${dayLabel}</span>
+        <span class="history-day-count">${group.matches.length} match${group.matches.length === 1 ? '' : 'es'}</span>
+      </button>
+      <div class="watch-card-grid history-day-cards" id="history-day-${group.date}" style="display:${isLatest ? 'grid' : 'none'};">
+        ${group.matches.map(renderHistoryCard).join('')}
+      </div>`;
+  }
+  container.innerHTML = html;
+}
+
+function toggleHistoryDay(date) {
+  const el = document.getElementById(`history-day-${date}`);
+  if (!el) return;
+  const isOpen = el.style.display !== 'none';
+  el.style.display = isOpen ? 'none' : 'grid';
+  const header = el.previousElementSibling;
+  if (header && header.classList.contains('history-day-header')) {
+    header.classList.toggle('expanded', !isOpen);
+  }
+}
+
+function renderHistoryCard(m) {
+  const title = m.match_name || `${m.team_a_name} vs ${m.team_b_name}`;
+  const teamA = m.team_a_name || 'Team A';
+  const teamB = m.team_b_name || 'Team B';
+  const aColor = teamColorCss(teamA, '#ef4444');
+  const bColor = teamColorCss(teamB, '#3b82f6');
+  const inningsArr = Array.isArray(m.innings) ? m.innings : [];
+  const aInnings = inningsArr.find(i => i.batting_team === 'A');
+  const bInnings = inningsArr.find(i => i.batting_team === 'B');
+  const scoreLine = (inn) => inn ? `${inn.total_runs}/${inn.total_wickets} (${parseFloat(inn.overs_completed).toFixed(1)} ov)` : '—';
+  let resultText, resultClass;
+  if (m.status === 'completed') {
+    if (m.winner_team === 'tie') { resultText = 'Match tied'; resultClass = 'history-result-tie'; }
+    else if (m.winner_team === 'A' || m.winner_team === 'B') { resultText = `${m.winner_team === 'A' ? teamA : teamB} won`; resultClass = 'history-result-win'; }
+    else { resultText = m.result_summary || 'Completed'; resultClass = 'history-result-win'; }
+  } else if (m.status === 'abandoned') {
+    resultText = 'Abandoned';
+    resultClass = 'history-result-tie';
+  } else {
+    resultText = 'In progress';
+    resultClass = 'history-result-progress';
+  }
+  return `
+    <button class="watch-match-card" onclick="openMatchScorecard(${m.id})">
+      <div class="watch-card-top">
+        <div class="watch-team-stack">
+          <div class="watch-team-row"><span class="watch-team-dot" style="background:${aColor}"></span><span class="watch-team-name">${teamA}</span></div>
+          <div class="watch-team-row"><span class="watch-team-dot" style="background:${bColor}"></span><span class="watch-team-name">${teamB}</span></div>
+        </div>
+        <div class="watch-score-stack">
+          <div class="watch-card-overs">${scoreLine(aInnings)}</div>
+          <div class="watch-card-overs">${scoreLine(bInnings)}</div>
+        </div>
+      </div>
+      <div class="watch-card-title">${title}</div>
+      <div class="watch-card-bottom ${resultClass}">${resultText}</div>
+    </button>`;
 }
 
 function openMatchScorecard(matchId) {
-  showView('scorecard');
-  const sel = document.getElementById('scorecard-match-select');
-  if (sel) {
-    sel.value = matchId;
-    loadFullScorecard();
-  }
+  showView('scorecard', matchId);
 }
 
 async function loadPlayers() {
@@ -663,11 +1144,12 @@ function openCompleteMatchModal() {
     <div class="modal-overlay" onclick="if(event.target===this) closeExtraModal()">
       <div class="modal-sheet">
         <h3>Record Match Result</h3>
-        <div class="pill-grid" style="grid-template-columns:repeat(3,1fr);">
+        <div class="pill-grid" style="grid-template-columns:repeat(2,1fr);">
           <button onclick="confirmMatchResult('A')">${teamAName} Won</button>
           <button onclick="confirmMatchResult('B')">${teamBName} Won</button>
-          <button onclick="confirmMatchResult('tie')">Tie</button>
+          <button onclick="confirmMatchResult('tie')" style="grid-column:1 / span 2;">Tie</button>
         </div>
+        <button class="btn btn-secondary btn-full" onclick="confirmAbandonMatch()">Abandon Match</button>
         <button class="btn btn-secondary btn-full" onclick="closeExtraModal()">Cancel</button>
       </div>
     </div>`;
@@ -680,6 +1162,15 @@ async function confirmMatchResult(winner) {
   });
   closeExtraModal();
   alert('Match result recorded.');
+}
+
+async function confirmAbandonMatch() {
+  await fetch(`${API}/matches/${state.matchId}/status`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ status: 'abandoned', result_summary: 'Abandoned from scorer UI' })
+  });
+  closeExtraModal();
+  alert('Match marked abandoned. Watch Live can now switch away.');
 }
 
 async function recordMatchResult(winnerTeam) {
@@ -984,8 +1475,8 @@ async function refreshScorecard(skipBowlerPrompt = false) {
 
   const bowlingBody = document.querySelector('#bowling-table tbody');
   bowlingBody.innerHTML = data.bowling.map(b => {
-    const econ = b.overs_bowled > 0 ? (b.runs_conceded / b.overs_bowled).toFixed(2) : '0.00';
-    return `<tr><td class="clickable-name" onclick="showPlayerCard(${b.player_id})">${b.name}</td><td>${b.overs_bowled}</td><td>${b.runs_conceded}</td><td>${b.wickets}</td><td>${econ}</td></tr>`;
+    const econ = calcEconomy(b.runs_conceded, b.overs_bowled);
+    return `<tr><td class="clickable-name" onclick="showPlayerCard(${b.player_id})">${b.name}</td><td>${b.overs_bowled}</td><td>${b.maidens || 0}</td><td>${b.runs_conceded}</td><td>${b.wickets}</td><td>${b.wides || 0}</td><td>${b.no_balls || 0}</td><td>${econ}</td></tr>`;
   }).join('');
 
   const eligibleRes = await fetch(`${API}/innings/${state.inningsId}/eligible-batsmen`);
@@ -1004,6 +1495,7 @@ async function refreshScorecard(skipBowlerPrompt = false) {
     `<option value="${id}" ${id === currentBowlerId ? 'selected' : ''}>${nameOf(id)}</option>`).join('');
 
   renderThisOverBalls(data.innings);
+  renderScoreOversRecap(data.overs_recap);
 
   const inningsEnded = await checkInningsCompletion(data);
 
@@ -1188,6 +1680,27 @@ async function confirmNextBowler() {
   refreshScorecard();
 }
 
+function renderScoreOversRecap(oversRecap) {
+  const el = document.getElementById('score-overs-recap');
+  if (!el) return;
+  const overs = Array.isArray(oversRecap) ? oversRecap : [];
+  el.innerHTML = overs.slice().reverse().map(over => {
+    const pills = over.balls.map(b => {
+      const isBoundary = b.runs === 4 || b.runs === 6;
+      const cls = b.is_wicket ? 'ball-pill wicket' : (isBoundary ? 'ball-pill boundary' : 'ball-pill');
+      return `<span class="${cls}">${b.display}</span>`;
+    }).join('');
+    return `
+      <div class="over-recap-row">
+        <div class="over-recap-header">
+          <span>Over ${over.over_no + 1} — <b>${over.bowler_name}</b> to ${over.batsman_name}</span>
+          <span class="over-recap-total">${over.runs} Runs, ${over.wickets} Wkt</span>
+        </div>
+        <div class="over-recap-balls">${pills}</div>
+      </div>`;
+  }).join('') || '<p class="helper-text">No balls recorded yet.</p>';
+}
+
 async function renderThisOverBalls(innings) {
   const oversInt = Math.floor(innings.overs_completed);
   const container = document.getElementById('this-over-balls');
@@ -1198,13 +1711,10 @@ async function renderThisOverBalls(innings) {
     return;
   }
   container.innerHTML = balls.map(b => {
-    let cls = 'runs', label = String(b.runs);
-    if (b.is_wicket) { cls = 'wicket'; label = 'W'; }
-    else if (b.extra_type === 'wide') { cls = 'extra'; label = 'Wd'; }
-    else if (b.extra_type === 'no_ball') { cls = 'extra'; label = `${b.runs}nb`; }
-    else if (b.runs === 4) { cls = 'four'; }
-    else if (b.runs === 6) { cls = 'six'; }
-    return `<div class="ball-pill ${cls}">${label}</div>`;
+    const isBoundary = b.runs === 4 || b.runs === 6;
+    const cls = b.is_wicket ? 'ball-pill wicket' : (isBoundary ? 'ball-pill boundary' : 'ball-pill');
+    const label = b.is_wicket ? 'W' : (b.extra_type === 'wide' ? 'Wd' : b.extra_type === 'no_ball' ? 'Nb' : String(b.runs));
+    return `<span class="${cls}">${label}</span>`;
   }).join('');
 }
 
@@ -1233,3 +1743,34 @@ async function loadOverallStats() {
     enterWatchMode();
   }
 })();
+
+// ---- PWA: service worker + install prompt ----
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.warn('Service worker registration failed:', err);
+    });
+  });
+}
+
+let deferredPwaInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  deferredPwaInstallPrompt = event;
+  const btn = document.getElementById('pwa-install-btn');
+  if (btn) btn.style.display = 'block';
+});
+
+function triggerPwaInstall() {
+  const btn = document.getElementById('pwa-install-btn');
+  if (btn) btn.style.display = 'none';
+  if (!deferredPwaInstallPrompt) return;
+  deferredPwaInstallPrompt.prompt();
+  deferredPwaInstallPrompt = null;
+}
+
+window.addEventListener('appinstalled', () => {
+  const btn = document.getElementById('pwa-install-btn');
+  if (btn) btn.style.display = 'none';
+  deferredPwaInstallPrompt = null;
+});

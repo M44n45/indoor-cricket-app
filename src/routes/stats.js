@@ -93,8 +93,15 @@ router.get('/overall', async (req, res) => {
 // Match history with results, for tracking day-to-day wins/losses
 router.get('/matches-history', async (req, res) => {
   const result = await pool.query(`
-    SELECT id, to_char(match_date, 'YYYY-MM-DD') AS match_date, team_a_name, team_b_name, winner_team, result_summary, status
-    FROM matches ORDER BY match_date DESC, id DESC
+    SELECT m.id, to_char(m.match_date, 'YYYY-MM-DD') AS match_date, m.match_name,
+      m.team_a_name, m.team_b_name, m.winner_team, m.result_summary, m.status,
+      (SELECT json_agg(json_build_object(
+          'innings_no', i.innings_no, 'batting_team', i.batting_team,
+          'total_runs', i.total_runs, 'total_wickets', i.total_wickets,
+          'overs_completed', i.overs_completed
+        ) ORDER BY i.innings_no)
+       FROM innings i WHERE i.match_id = m.id) AS innings
+    FROM matches m ORDER BY m.match_date DESC, m.id DESC
   `);
   res.json(result.rows);
 });
@@ -153,23 +160,35 @@ router.get('/leaderboard', async (req, res) => {
     ORDER BY total_runs DESC
   `);
 
+  // overs_bowled is stored in cricket notation (e.g. 3.4 = 3 overs + 4 balls,
+  // not a base-10 decimal), so it must be converted to a true balls count
+  // before summing across records or dividing for economy — otherwise both
+  // the aggregated overs and the economy rate come out wrong.
   const bowlingRes = await pool.query(`
     WITH match_counts AS (
       SELECT player_id, COUNT(DISTINCT match_id) AS matches_played
       FROM match_players GROUP BY player_id
+    ),
+    bowling_totals AS (
+      SELECT player_id,
+        SUM(FLOOR(overs_bowled)::int * 6 + ROUND((overs_bowled - FLOOR(overs_bowled)) * 10)::int) AS total_balls,
+        SUM(wickets) AS wickets,
+        SUM(runs_conceded) AS runs_conceded
+      FROM bowling_records
+      GROUP BY player_id
     )
     SELECT p.id AS player_id, p.name,
       COALESCE(mc.matches_played, 0) AS matches_played,
-      COALESCE(SUM(bwr.overs_bowled), 0) AS overs_bowled,
-      COALESCE(SUM(bwr.wickets), 0) AS wickets,
-      COALESCE(SUM(bwr.runs_conceded), 0) AS runs_conceded,
-      CASE WHEN COALESCE(SUM(bwr.overs_bowled), 0) > 0
-        THEN ROUND(SUM(bwr.runs_conceded)::numeric / SUM(bwr.overs_bowled), 2)
+      COALESCE(FLOOR(bt.total_balls / 6), 0) + COALESCE(MOD(bt.total_balls, 6), 0) / 10.0 AS overs_bowled,
+      COALESCE(bt.wickets, 0) AS wickets,
+      COALESCE(bt.runs_conceded, 0) AS runs_conceded,
+      CASE WHEN COALESCE(bt.total_balls, 0) > 0
+        THEN ROUND(COALESCE(bt.runs_conceded, 0)::numeric / (bt.total_balls / 6.0), 2)
         ELSE 0 END AS economy
     FROM players p
-    LEFT JOIN bowling_records bwr ON bwr.player_id = p.id
+    LEFT JOIN bowling_totals bt ON bt.player_id = p.id
     LEFT JOIN match_counts mc ON mc.player_id = p.id
-    GROUP BY p.id, p.name, mc.matches_played
+    GROUP BY p.id, p.name, mc.matches_played, bt.total_balls, bt.wickets, bt.runs_conceded
     ORDER BY wickets DESC, economy ASC
   `);
 
@@ -195,7 +214,8 @@ router.get('/player/:playerId', async (req, res) => {
   `, [playerId]);
 
   const bowlingRes = await pool.query(`
-    SELECT COALESCE(SUM(wickets), 0) AS wickets, COALESCE(SUM(overs_bowled), 0) AS overs_bowled,
+    SELECT COALESCE(SUM(wickets), 0) AS wickets,
+      COALESCE(SUM(FLOOR(overs_bowled)::int * 6 + ROUND((overs_bowled - FLOOR(overs_bowled)) * 10)::int), 0) AS total_balls,
       COALESCE(SUM(runs_conceded), 0) AS runs_conceded
     FROM bowling_records WHERE player_id = $1
   `, [playerId]);
@@ -206,6 +226,7 @@ router.get('/player/:playerId', async (req, res) => {
 
   const b = battingRes.rows[0];
   const bowl = bowlingRes.rows[0];
+  const totalBalls = parseInt(bowl.total_balls) || 0;
   const dismissals = parseInt(b.dismissals);
   const inningsPlayed = parseInt(b.innings_played);
   const ballsFaced = parseInt(b.balls_faced);
@@ -228,7 +249,7 @@ router.get('/player/:playerId', async (req, res) => {
     average,
     strike_rate: strikeRate,
     wickets: parseInt(bowl.wickets),
-    overs_bowled: parseFloat(bowl.overs_bowled),
+    overs_bowled: Math.floor(totalBalls / 6) + (totalBalls % 6) / 10,
     runs_conceded: parseInt(bowl.runs_conceded)
   });
 });

@@ -9,6 +9,7 @@ const playersRouter = require('./routes/players');
 const matchesRouter = require('./routes/matches');
 const scoringRouter = require('./routes/scoring');
 const statsRouter = require('./routes/stats');
+const adminRouter = require('./routes/admin');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -30,6 +31,7 @@ app.use('/api/players', playersRouter);
 app.use('/api/matches', matchesRouter);
 app.use('/api', scoringRouter);
 app.use('/api/stats', statsRouter);
+app.use('/api/admin', adminRouter);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 

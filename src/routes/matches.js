@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db/pool');
+const { requireAdminToken } = require('./admin');
 
 // Create a match, split teams (supports one common player on both sides)
 router.post('/', async (req, res) => {
@@ -129,6 +130,28 @@ router.get('/:matchId/current-innings', async (req, res) => {
   res.json(result.rows[0] || null);
 });
 
+// The player roster actually assigned to this match, split back into team A,
+// team B, and "common" (players who appear in both teams' lists). Used to
+// rehydrate scorer state when re-entering an in-progress match (e.g. via
+// admin console's "Continue Scoring"), since the setup screen's in-memory
+// team-assignment state doesn't survive a fresh page/session.
+router.get('/:matchId/players', async (req, res) => {
+  const result = await pool.query(
+    'SELECT player_id, team FROM match_players WHERE match_id=$1',
+    [req.params.matchId]
+  );
+  const aSet = new Set(), bSet = new Set();
+  for (const row of result.rows) {
+    if (row.team === 'A') aSet.add(row.player_id);
+    else if (row.team === 'B') bSet.add(row.player_id);
+  }
+  const commonIds = [...aSet].filter(id => bSet.has(id));
+  const commonSet = new Set(commonIds);
+  const teamAIds = [...aSet].filter(id => !commonSet.has(id));
+  const teamBIds = [...bSet].filter(id => !commonSet.has(id));
+  res.json({ team_a_player_ids: teamAIds, team_b_player_ids: teamBIds, common_player_ids: commonIds });
+});
+
 router.get('/', async (req, res) => {
   const result = await pool.query('SELECT * FROM matches ORDER BY created_at DESC');
   res.json(result.rows);
@@ -138,6 +161,30 @@ router.get('/', async (req, res) => {
 router.post('/innings/:inningsId/complete', async (req, res) => {
   const { inningsId } = req.params;
   await pool.query(`UPDATE innings SET status='completed' WHERE id=$1`, [inningsId]);
+  res.json({ success: true });
+});
+
+
+
+// Update a match status directly (e.g. abandon a match or switch its state)
+router.post('/:matchId/status', async (req, res) => {
+  const { matchId } = req.params;
+  const { status, winner_team = null, result_summary = null } = req.body;
+  await pool.query(
+    `UPDATE matches SET status=$1, winner_team=$2, result_summary=$3 WHERE id=$4`,
+    [status, winner_team, result_summary, matchId]
+  );
+  res.json({ success: true });
+});
+
+// Permanently delete a match and everything under it (innings, batting/bowling
+// records, ball events, fall of wickets — all cascade via FK ON DELETE CASCADE).
+// Admin-only: requires a valid admin session token from /api/admin/login.
+router.delete('/:matchId', requireAdminToken, async (req, res) => {
+  const result = await pool.query('DELETE FROM matches WHERE id=$1 RETURNING id', [req.params.matchId]);
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: 'Match not found' });
+  }
   res.json({ success: true });
 });
 

@@ -2327,14 +2327,9 @@ function showInningsCompleteModal(reason) {
         <h3>Innings Complete</h3>
         <p class="helper-text">${reason} Ready to start the next innings?</p>
         <button class="btn btn-primary btn-full" onclick="startNextInnings()">Start Next Innings</button>
-        <button class="btn btn-secondary btn-full" style="margin-top:6px;" onclick="delayStartNextInnings()">Not yet</button>
+        <button class="btn btn-secondary btn-full" style="margin-top:6px;" onclick="closeExtraModal()">Not yet</button>
       </div>
     </div>`;
-}
-
-function delayStartNextInnings() {
-  state.inningsCompletionHandled = false;
-  closeExtraModal();
 }
 
 async function startNextInnings() {

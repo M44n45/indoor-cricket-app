@@ -14,10 +14,13 @@ CREATE TABLE IF NOT EXISTS matches (
   team_a_name TEXT NOT NULL,
   team_b_name TEXT NOT NULL,
   match_name TEXT,
+  match_time TEXT, -- optional free-form scheduled time, e.g. '18:30' (display only)
   status TEXT DEFAULT 'setup', -- setup, in_progress, completed
   winner_team TEXT, -- 'A' or 'B' or 'tie'
   result_summary TEXT,
   current_innings INT DEFAULT 1,
+  toss_winner_team TEXT, -- 'A' or 'B' — set once the toss has happened
+  toss_decision TEXT, -- 'bat' or 'bowl' — what the toss winner elected to do
   created_at TIMESTAMP DEFAULT NOW()
 );
 

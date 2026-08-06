@@ -1,6 +1,6 @@
 {
   "name": "indoor-cricket-app",
-  "version": "0.991",
+  "version": "0.992",
   "description": "Indoor cricket scoring webapp with common-player and 2-over retirement rules",
   "main": "src/server.js",
   "scripts": {

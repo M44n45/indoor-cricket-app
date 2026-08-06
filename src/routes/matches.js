@@ -21,7 +21,7 @@ function normalizeNullableInt(value) {
 // Create a match, split teams (supports one common player on both sides)
 router.post('/', async (req, res) => {
   const {
-    match_date, overs_limit = 8, retirement_overs = 2,
+    match_date, match_time = null, overs_limit = 8, retirement_overs = 2,
     team_a_name, team_b_name, match_name, team_a_player_ids, team_b_player_ids
   } = req.body;
 
@@ -33,9 +33,9 @@ router.post('/', async (req, res) => {
   try {
     await client.query('BEGIN');
     const matchResult = await client.query(
-      `INSERT INTO matches (match_date, overs_limit, retirement_overs, team_a_name, team_b_name, match_name, status)
-       VALUES ($1, $2, $3, $4, $5, $6, 'setup') RETURNING *`,
-      [match_date || new Date(), overs_limit, retirement_overs, team_a_name, team_b_name, match_name || `${team_a_name} vs ${team_b_name}`]
+      `INSERT INTO matches (match_date, match_time, overs_limit, retirement_overs, team_a_name, team_b_name, match_name, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'setup') RETURNING *`,
+      [match_date || new Date(), match_time || null, overs_limit, retirement_overs, team_a_name, team_b_name, match_name || `${team_a_name} vs ${team_b_name}`]
     );
     const match = matchResult.rows[0];
 
@@ -181,6 +181,37 @@ router.get('/:matchId/players', async (req, res) => {
 router.get('/', async (req, res) => {
   const result = await pool.query('SELECT * FROM matches ORDER BY created_at DESC');
   res.json(result.rows);
+});
+
+// Matches that have been set up (teams assigned) but not yet started —
+// i.e. scheduled for a future/upcoming session. Ordered by when they're due
+// to be played, not when they were created, so the soonest game is first.
+router.get('/status/scheduled', async (req, res) => {
+  const result = await pool.query(
+    `SELECT * FROM matches WHERE status='setup'
+     ORDER BY match_date ASC, match_time ASC NULLS LAST, created_at ASC`
+  );
+  res.json(result.rows);
+});
+
+// Record the on-the-day coin toss for a match that was set up in advance
+// (or just before starting the first innings). Doesn't change match status —
+// the match still only becomes 'in_progress' once the first innings starts.
+router.post('/:matchId/toss', async (req, res) => {
+  const { matchId } = req.params;
+  const { toss_winner_team, toss_decision } = req.body;
+  if (!['A', 'B'].includes(toss_winner_team)) {
+    return res.status(400).json({ error: "toss_winner_team must be 'A' or 'B'" });
+  }
+  if (!['bat', 'bowl'].includes(toss_decision)) {
+    return res.status(400).json({ error: "toss_decision must be 'bat' or 'bowl'" });
+  }
+  const result = await pool.query(
+    `UPDATE matches SET toss_winner_team=$1, toss_decision=$2 WHERE id=$3 RETURNING *`,
+    [toss_winner_team, toss_decision, matchId]
+  );
+  if (result.rows.length === 0) return res.status(404).json({ error: 'Match not found' });
+  res.json(result.rows[0]);
 });
 
 // Mark an innings as completed (all out, or overs finished, or manually ended)

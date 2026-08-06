@@ -16,6 +16,15 @@ async function initDb() {
   // wiped fielder_id back to null. Storing it on the ball event itself fixes that.
   await pool.query(`ALTER TABLE ball_events ADD COLUMN IF NOT EXISTS fielder_id INT REFERENCES players(id);`);
 
+  // Migration: schedule-in-advance support. A match can now be created with
+  // teams set days ahead of time (status stays 'setup' until the first innings
+  // actually starts). match_time is an optional free-form display string
+  // ('18:30'), and the toss_* columns record the on-the-day coin toss once it
+  // happens, separate from team setup.
+  await pool.query(`ALTER TABLE matches ADD COLUMN IF NOT EXISTS match_time TEXT;`);
+  await pool.query(`ALTER TABLE matches ADD COLUMN IF NOT EXISTS toss_winner_team TEXT;`);
+  await pool.query(`ALTER TABLE matches ADD COLUMN IF NOT EXISTS toss_decision TEXT;`);
+
   const countRes = await pool.query('SELECT COUNT(*) FROM players');
   if (parseInt(countRes.rows[0].count) === 0) {
     // seed_players.sql is gitignored on purpose — it holds one specific

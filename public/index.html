@@ -385,13 +385,13 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
   ✅ Back online — syncing…
 </div>
 
-<div class="topbar"><h1 id="topbar-title">CageCricket Live <span style="font-size:10px; opacity:0.55; font-weight:400; vertical-align:middle;">v0.991</span></h1><div style="display:flex; gap:6px;"><button id="back-to-mode-btn" class="btn-small" onclick="backToModeSelect()">← Modes</button><button id="share-watch-btn" class="btn-small" style="display:none;" onclick="shareWatchLink()">🔗 Share</button></div></div>
+<div class="topbar"><h1 id="topbar-title">CageCricket Live <span style="font-size:10px; opacity:0.55; font-weight:400; vertical-align:middle;">v0.992</span></h1><div style="display:flex; gap:6px;"><button id="back-to-mode-btn" class="btn-small" onclick="backToModeSelect()">← Modes</button><button id="share-watch-btn" class="btn-small" style="display:none;" onclick="shareWatchLink()">🔗 Share</button></div></div>
 
 <div id="mode-select-view">
   <div class="landing-hero">
     <div class="landing-hero-icon">🏏</div>
     <h1 class="landing-title">CageCricket Live</h1>
-    <div class="landing-version-badge">v0.991</div>
+    <div class="landing-version-badge">v0.992</div>
   </div>
   <div class="landing-actions">
     <button class="landing-card landing-card-primary" onclick="enterScorerMode()">
@@ -432,7 +432,7 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
   <div class="landing-hero" style="padding:36px 20px 24px;">
     <div class="landing-hero-icon">🏏</div>
     <h1 class="landing-title">CageCricket Live</h1>
-    <div class="landing-version-badge">v0.991</div>
+    <div class="landing-version-badge">v0.992</div>
   </div>
   <div class="card">
     <h2>What it does</h2>
@@ -542,6 +542,17 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
     <input id="team-b-name" class="field" placeholder="Team B name" value="Team B">
     <div style="display:flex; gap:8px;">
       <div style="flex:1;">
+        <span class="sub-label">Match Date</span>
+        <input id="match-date" class="field" type="date">
+      </div>
+      <div style="flex:1;">
+        <span class="sub-label">Match Time <span style="font-weight:400; color:var(--sub);">(optional)</span></span>
+        <input id="match-time" class="field" type="time">
+      </div>
+    </div>
+    <p class="helper-text" style="margin-top:-6px; margin-bottom:10px;">Set a future date to save this as a scheduled match — teams and settings are saved now, and you do the toss and start scoring on the day.</p>
+    <div style="display:flex; gap:8px;">
+      <div style="flex:1;">
         <span class="sub-label">Total Overs (per innings)</span>
         <input id="overs-limit" class="field" type="number" step="0.1" value="8" placeholder="e.g. 8 or 3.5">
       </div>
@@ -604,12 +615,25 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
     </button>
   </div>
 
+  <div class="card" id="schedule-later-card" style="display:none;">
+    <h2>Match Day Actions</h2>
+    <p class="helper-text">Teams and settings are saved. Do the toss and start scoring whenever you're ready — no need to do it now.</p>
+    <button class="btn btn-secondary btn-full" onclick="backToModeSelect()">Save &amp; Schedule for Later</button>
+  </div>
+
   <div class="card" id="start-innings-card" style="display:none;">
     <h2>Start the Match</h2>
-    <p class="helper-text">Choose which team bats first. You'll pick the opening batsman and bowler from the Live Score screen once the innings begins.</p>
-    <span class="sub-label">Who Bats First?</span>
-    <select id="innings-batting-team" class="field"><option value="A">Team A bats first</option><option value="B">Team B bats first</option></select>
-    <button class="btn btn-primary btn-full" onclick="startInnings()">Start Innings</button>
+    <div id="toss-not-done-block">
+      <p class="helper-text">Do the coin toss first, then pick the opening batsman and bowler from the Live Score screen once the innings begins.</p>
+      <button class="btn btn-primary btn-full" onclick="openTossModal()">🪙 Do the Toss</button>
+    </div>
+    <div id="toss-done-block" style="display:none;">
+      <p class="helper-text" id="toss-result-summary"></p>
+      <span class="sub-label">Who Bats First?</span>
+      <select id="innings-batting-team" class="field"><option value="A">Team A bats first</option><option value="B">Team B bats first</option></select>
+      <button class="btn btn-secondary btn-full" style="margin-bottom:8px;" onclick="openTossModal()">Redo Toss</button>
+      <button class="btn btn-primary btn-full" onclick="startInnings()">Start Innings</button>
+    </div>
   </div>
 </div>
 

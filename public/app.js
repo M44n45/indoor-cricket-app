@@ -465,6 +465,8 @@ function enterScorerMode() {
   document.getElementById('share-watch-btn').style.display = state.matchId ? 'block' : 'none';
   const gear = document.getElementById('floating-admin-gear');
   if (gear) gear.style.display = 'none';
+  const dateInput = document.getElementById('match-date');
+  if (dateInput && !dateInput.value) dateInput.value = new Date().toLocaleDateString('en-CA');
   showView('setup');
   loadPlayers();
 }
@@ -544,8 +546,41 @@ async function promptWatchMatchSelection() {
   const res = await fetch(`${API}/matches`);
   const matches = await res.json();
   const liveMatches = matches.filter(m => m.status === 'in_progress').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  const scheduledMatches = matches.filter(m => m.status === 'setup')
+    .sort((a, b) => new Date(`${a.match_date || a.created_at}T${a.match_time || '00:00'}`) - new Date(`${b.match_date || b.created_at}T${b.match_time || '00:00'}`));
+
+  const scheduledCardsHtml = scheduledMatches.map(m => {
+    const title = m.match_name || `${m.team_a_name} vs ${m.team_b_name}`;
+    const teamA = m.team_a_name || 'Team A';
+    const teamB = m.team_b_name || 'Team B';
+    const aColor = teamColorCss(teamA, '#ef4444');
+    const bColor = teamColorCss(teamB, '#3b82f6');
+    const whenBits = [formatDateOnly(m.match_date), m.match_time].filter(Boolean);
+    const whenLine = whenBits.length ? whenBits.join(' &middot; ') : 'Date TBC';
+    const tossLine = m.toss_winner_team
+      ? `🪙 ${m.toss_winner_team === 'A' ? teamA : teamB} won the toss, chose to ${m.toss_decision}`
+      : 'Toss not done yet';
+    return `
+      <div class="watch-match-card" style="cursor:default;">
+        <div class="watch-card-top">
+          <div class="watch-team-stack">
+            <div class="watch-team-row"><span class="watch-team-dot" style="background:${aColor}"></span><span class="watch-team-name">${teamA}</span></div>
+            <div class="watch-team-row"><span class="watch-team-dot" style="background:${bColor}"></span><span class="watch-team-name">${teamB}</span></div>
+          </div>
+          <div class="watch-score-stack">
+            <div class="watch-card-overs" style="font-weight:700;">Scheduled</div>
+          </div>
+        </div>
+        <div class="watch-card-title">${title}</div>
+        <div class="watch-card-bottom">${whenLine}</div>
+        <div class="watch-card-bottom">${tossLine}</div>
+      </div>`;
+  }).join('');
+
   if (liveMatches.length === 0) {
-    document.getElementById('watch-view').innerHTML = `<div class="card" style="margin-top:60px; text-align:center;"><p class="helper-text" style="text-align:center;">No match is currently in progress. Ask the scorer to start one, or check back soon.</p></div>`;
+    document.getElementById('watch-view').innerHTML = `
+      <div class="card" style="margin-top:24px; text-align:center;"><p class="helper-text" style="text-align:center;">No match is currently in progress. Ask the scorer to start one, or check back soon.</p></div>
+      ${scheduledMatches.length ? `<div class="card"><h2>Scheduled</h2><p class="helper-text">These matches are set up and waiting to start.</p><div class="watch-card-grid">${scheduledCardsHtml}</div></div>` : ''}`;
     return;
   }
   const cards = await Promise.all(liveMatches.map(async (m) => {
@@ -601,7 +636,8 @@ async function promptWatchMatchSelection() {
       <h2>Live Matches</h2>
       <p class="helper-text">Tap any match card to open the detailed live view.</p>
       <div class="watch-card-grid">${cards.join('')}</div>
-    </div>`;
+    </div>
+    ${scheduledMatches.length ? `<div class="card"><h2>Scheduled</h2><p class="helper-text">These matches are set up and waiting to start.</p><div class="watch-card-grid">${scheduledCardsHtml}</div></div>` : ''}`;
 }
 
 function openWatchMatch(matchId) {
@@ -828,8 +864,7 @@ async function refreshWatchScorecard() {
   const runs = Number(innings.total_runs || 0);
   const wickets = Number(innings.total_wickets || 0);
   const oversCompleted = Number(innings.overs_completed || 0);
-  // Use true overs for CRR so 3 balls contributes 0.5 overs, not 0.3.
-  const crrOvers = trueOvers(oversCompleted);
+  const crrOvers = trueOvers(innings.overs_completed);
   const crr = crrOvers > 0 ? (runs / crrOvers).toFixed(2) : '0.00';
 
   if (battingTeamEl) battingTeamEl.innerText = innings.batting_team === 'A' ? (match.team_a_name || 'Team A') : (match.team_b_name || 'Team B');
@@ -1138,7 +1173,27 @@ async function loadAdminConsole() {
       if (cached) matches = [cached];
     }
   }
-  const rows = matches.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map(m => {
+  const scheduledMatches = matches.filter(m => m.status === 'setup')
+    .sort((a, b) => new Date(`${a.match_date || a.created_at}T${a.match_time || '00:00'}`) - new Date(`${b.match_date || b.created_at}T${b.match_time || '00:00'}`));
+  const otherMatches = matches.filter(m => m.status !== 'setup');
+
+  const scheduledRows = scheduledMatches.map(m => {
+    const title = m.match_name || `${m.team_a_name} vs ${m.team_b_name}`;
+    const whenBits = [formatDateOnly(m.match_date), m.match_time].filter(Boolean);
+    const tossBit = m.toss_winner_team ? ` &middot; Toss done` : '';
+    return `<div class="card admin-match-card">
+      <div class="admin-match-header">
+        <div class="admin-match-title">${title}</div>
+        <div class="helper-text">${whenBits.join(' &middot; ') || 'No date set'}${tossBit}</div>
+      </div>
+      <div class="admin-match-actions">
+        <button class="btn btn-primary" onclick="continueScoring(${m.id})">Open &amp; Start</button>
+        <button class="btn btn-secondary admin-btn-danger" onclick="deleteMatch(${m.id})">Delete</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  const rows = otherMatches.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map(m => {
     const title = m.match_name || `${m.team_a_name} vs ${m.team_b_name}`;
     const canResume = m.status === 'in_progress' || m.status === 'completed' || m.status === 'abandoned';
     const resumeLabel = m.status === 'in_progress' ? 'Continue Scoring' : 'Resume & Edit';
@@ -1158,6 +1213,7 @@ async function loadAdminConsole() {
   if (gear) gear.style.display = 'none';
   document.getElementById('admin-view').innerHTML = `
     <div id="admin-usage-card" class="card" style="margin-top:24px;"><p class="helper-text">Loading usage stats…</p></div>
+    ${scheduledMatches.length ? `<div class="card"><h2>Scheduled Matches</h2><p class="helper-text">Set up in advance — do the toss and start these when ready.</p></div>${scheduledRows}` : ''}
     <div class="card"><div style="display:flex; justify-content:space-between; align-items:center; gap:12px;"><div><h2>Existing Matches</h2><p class="helper-text">Use this to force-match completion, resume a match to fix a mistake, or delete a match.</p></div><button class="btn btn-secondary" style="width:auto; flex:0 0 auto;" onclick="backToModeSelect()">Back</button></div>${rows || '<p class="helper-text">No matches found.</p>'}</div>`;
   loadAdminUsageStats();
 }
@@ -1228,6 +1284,10 @@ async function continueScoring(matchId) {
     document.getElementById('team-a-name').value = match.team_a_name || document.getElementById('team-a-name').value || 'Team A';
     document.getElementById('team-b-name').value = match.team_b_name || document.getElementById('team-b-name').value || 'Team B';
     document.getElementById('match-name').value = match.match_name || '';
+    const matchDateInput = document.getElementById('match-date');
+    if (matchDateInput) matchDateInput.value = match.match_date ? String(match.match_date).slice(0, 10) : matchDateInput.value;
+    const matchTimeInput = document.getElementById('match-time');
+    if (matchTimeInput) matchTimeInput.value = match.match_time || '';
     document.getElementById('overs-limit').value = match.overs_limit || document.getElementById('overs-limit').value || 10;
     document.getElementById('retirement-overs').value = match.retirement_overs || document.getElementById('retirement-overs').value || 5;
     state.matchOversLimit = parseFloat(match.overs_limit) || 8;
@@ -1277,6 +1337,19 @@ async function continueScoring(matchId) {
         return;
       }
     }
+    // No innings yet — this is a scheduled/setup match. Show the same
+    // "ready to start" UI as right after creating a match, so the scorer
+    // can do the toss and start (or leave it scheduled for later again).
+    showView('setup');
+    document.getElementById('start-innings-card').style.display = 'block';
+    document.getElementById('schedule-later-card').style.display = 'block';
+    document.getElementById('attendance-assign-section').style.display = 'none';
+    document.getElementById('add-player-section').style.display = 'none';
+    document.getElementById('edit-teams-toggle-card').style.display = 'block';
+    renderTeamsSummary(match);
+    resetTossUI(match);
+    document.getElementById('sb-overs-limit').innerText = `${match.overs_limit} overs`;
+    return;
   }
   showView('setup');
 }
@@ -1704,10 +1777,14 @@ async function createMatch() {
   const teamAName = document.getElementById('team-a-name').value || 'Team A';
   const teamBName = document.getElementById('team-b-name').value || 'Team B';
   const matchNameInput = document.getElementById('match-name').value.trim();
+  const matchDateInput = document.getElementById('match-date');
+  const matchTimeInput = document.getElementById('match-time');
   const body = {
     team_a_name: teamAName,
     team_b_name: teamBName,
     match_name: matchNameInput || `${teamAName} vs ${teamBName}`,
+    match_date: (matchDateInput && matchDateInput.value) || undefined,
+    match_time: (matchTimeInput && matchTimeInput.value) || null,
     overs_limit: parseFloat(document.getElementById('overs-limit').value),
     retirement_overs: parseFloat(document.getElementById('retirement-overs').value),
     team_a_player_ids: [...state.teamAIds, ...state.commonPlayerIds],
@@ -1734,14 +1811,17 @@ async function createMatch() {
   }
   document.getElementById('match-status').innerText = `Match created: ${match.team_a_name} vs ${match.team_b_name}`;
   document.getElementById('start-innings-card').style.display = 'block';
+  document.getElementById('schedule-later-card').style.display = 'block';
   document.getElementById('attendance-assign-section').style.display = 'none';
   document.getElementById('add-player-section').style.display = 'none';
   document.getElementById('edit-teams-toggle-card').style.display = 'block';
   renderTeamsSummary(match);
+  resetTossUI(match);
   populateInningsSelectors();
   document.getElementById('sb-overs-limit').innerText = `${match.overs_limit} overs`;
   document.getElementById('share-watch-btn').style.display = 'block';
 }
+
 
 function populateInningsSelectors() {
   // Striker/bowler are now chosen via the opening-players modal after the innings starts,
@@ -1827,6 +1907,88 @@ async function confirmOpeningPlayers() {
   });
   closeExtraModal();
   refreshScorecard();
+}
+
+// --- Coin toss (done on match day, separate from team setup) ---
+
+// Shows/hides the toss-not-done vs toss-done blocks in the Start Match card
+// based on whether this match already has a recorded toss (e.g. resuming a
+// match that was scheduled earlier, or re-entering after the toss was done).
+function resetTossUI(match) {
+  const notDone = document.getElementById('toss-not-done-block');
+  const done = document.getElementById('toss-done-block');
+  if (!notDone || !done) return;
+  if (match && match.toss_winner_team && match.toss_decision) {
+    notDone.style.display = 'none';
+    done.style.display = 'block';
+    applyTossResult(match);
+  } else {
+    notDone.style.display = 'block';
+    done.style.display = 'none';
+  }
+}
+
+function applyTossResult(match) {
+  const teamAName = document.getElementById('team-a-name').value || 'Team A';
+  const teamBName = document.getElementById('team-b-name').value || 'Team B';
+  const winnerName = match.toss_winner_team === 'A' ? teamAName : teamBName;
+  const battingTeam = match.toss_decision === 'bat' ? match.toss_winner_team : (match.toss_winner_team === 'A' ? 'B' : 'A');
+  const summaryEl = document.getElementById('toss-result-summary');
+  if (summaryEl) summaryEl.innerText = `🪙 ${winnerName} won the toss and chose to ${match.toss_decision}.`;
+  const select = document.getElementById('innings-batting-team');
+  if (select) select.value = battingTeam;
+}
+
+function openTossModal() {
+  const teamAName = document.getElementById('team-a-name').value || 'Team A';
+  const teamBName = document.getElementById('team-b-name').value || 'Team B';
+  if (!state.tossPick) state.tossPick = { winner: null, decision: null };
+  const pick = state.tossPick;
+  const container = document.getElementById('extra-modal-container');
+  container.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this) closeExtraModal()">
+      <div class="modal-sheet">
+        <h3>Who won the toss?</h3>
+        <div class="pill-grid" style="grid-template-columns:repeat(2,1fr);">
+          <button onclick="selectTossWinner('A')" class="${pick.winner === 'A' ? 'selected' : ''}">${teamAName}</button>
+          <button onclick="selectTossWinner('B')" class="${pick.winner === 'B' ? 'selected' : ''}">${teamBName}</button>
+        </div>
+        <div id="toss-decision-block" style="${pick.winner ? '' : 'display:none;'}">
+          <span class="sub-label">Elected to</span>
+          <div class="pill-grid" style="grid-template-columns:repeat(2,1fr);">
+            <button onclick="selectTossDecision('bat')" class="${pick.decision === 'bat' ? 'selected' : ''}">Bat</button>
+            <button onclick="selectTossDecision('bowl')" class="${pick.decision === 'bowl' ? 'selected' : ''}">Bowl</button>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-full" onclick="confirmToss()" ${pick.winner && pick.decision ? '' : 'disabled'}>Confirm Toss</button>
+        <button class="btn btn-secondary btn-full" onclick="closeExtraModal()">Cancel</button>
+      </div>
+    </div>`;
+}
+
+function selectTossWinner(team) {
+  state.tossPick = state.tossPick || {};
+  state.tossPick.winner = team;
+  openTossModal();
+}
+
+function selectTossDecision(decision) {
+  state.tossPick = state.tossPick || {};
+  state.tossPick.decision = decision;
+  openTossModal();
+}
+
+async function confirmToss() {
+  const pick = state.tossPick;
+  if (!pick || !pick.winner || !pick.decision || !state.matchId) return;
+  const res = await apiFetch(`${API}/matches/${state.matchId}/toss`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ toss_winner_team: pick.winner, toss_decision: pick.decision })
+  });
+  const match = await res.json();
+  state.tossPick = null;
+  closeExtraModal();
+  resetTossUI(match);
 }
 
 function openCompleteMatchModal() {

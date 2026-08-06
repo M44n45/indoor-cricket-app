@@ -828,7 +828,8 @@ async function refreshWatchScorecard() {
   const runs = Number(innings.total_runs || 0);
   const wickets = Number(innings.total_wickets || 0);
   const oversCompleted = Number(innings.overs_completed || 0);
-  const crr = oversCompleted > 0 ? (runs / oversCompleted).toFixed(2) : '0.00';
+  const crrOvers = trueOvers(innings.overs_completed);
+  const crr = crrOvers > 0 ? (runs / crrOvers).toFixed(2) : '0.00';
 
   if (battingTeamEl) battingTeamEl.innerText = innings.batting_team === 'A' ? (match.team_a_name || 'Team A') : (match.team_b_name || 'Team B');
   if (oversLimitEl) oversLimitEl.innerText = match.overs_limit ? `${match.overs_limit} ov limit` : '';

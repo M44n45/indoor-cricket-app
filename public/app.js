@@ -1253,7 +1253,25 @@ async function continueScoring(matchId) {
         const battingName = innings.batting_team === 'A' ? (match.team_a_name || 'Team A') : (match.team_b_name || 'Team B');
         document.getElementById('sb-batting-team').innerText = battingName;
         showView('score');
+
+        // Innings 1 completed but innings 2 not started yet — restore target state
+        // and re-show the innings-complete prompt so the scorer can kick off innings 2.
+        if (innings.status === 'completed' && innings.innings_no === 1) {
+          state.matchTarget = innings.total_runs + 1;
+          state.firstInningsScore = `${innings.total_runs}/${innings.total_wickets}`;
+          state.firstInningsTeamName = battingName;
+          state.inningsCompletionHandled = false;
+          await refreshScorecard(true);
+          showInningsCompleteModal('Innings 1 is complete.');
+          return;
+        }
+
         await refreshScorecard(true);
+
+        // Opener modal was dismissed before setting striker/bowler — re-prompt.
+        if (!innings.striker_id || !innings.bowler_id) {
+          promptOpeningBatsmanAndBowler(innings.batting_team);
+        }
         return;
       }
     }
@@ -2105,8 +2123,8 @@ async function refreshScorecard(skipBowlerPrompt = false) {
 
   document.getElementById('sb-score').innerText = `${data.innings.total_runs}/${data.innings.total_wickets}`;
   document.getElementById('sb-overs').innerText = `${parseFloat(data.innings.overs_completed).toFixed(1)} ov`;
-  const oversNum = parseFloat(data.innings.overs_completed) || 0.0001;
-  const crr = (data.innings.total_runs / oversNum).toFixed(2);
+  const oversNum = trueOvers(data.innings.overs_completed);
+  const crr = oversNum > 0 ? (data.innings.total_runs / oversNum).toFixed(2) : '0.00';
   document.getElementById('sb-crr').innerText = `CRR ${crr}`;
 
   const striker = data.batting.find(b => b.player_id === data.innings.striker_id);

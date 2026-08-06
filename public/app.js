@@ -828,7 +828,8 @@ async function refreshWatchScorecard() {
   const runs = Number(innings.total_runs || 0);
   const wickets = Number(innings.total_wickets || 0);
   const oversCompleted = Number(innings.overs_completed || 0);
-  const crrOvers = trueOvers(innings.overs_completed);
+  // Use true overs for CRR so 3 balls contributes 0.5 overs, not 0.3.
+  const crrOvers = trueOvers(oversCompleted);
   const crr = crrOvers > 0 ? (runs / crrOvers).toFixed(2) : '0.00';
 
   if (battingTeamEl) battingTeamEl.innerText = innings.batting_team === 'A' ? (match.team_a_name || 'Team A') : (match.team_b_name || 'Team B');

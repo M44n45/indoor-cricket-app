@@ -2745,10 +2745,10 @@ async function renderThisOverBalls(innings) {
 }
 
 // On load: show the Scorer/Watcher choice screen. Do NOT auto-jump into setup.
-// If the URL has a ?match= param, assume the visitor wants to watch that match directly.
+// If the URL has a ?match= param or a ?view=watch param, assume the visitor wants to watch directly.
 (function initApp() {
   const urlParams = new URLSearchParams(window.location.search);
-  if (urlParams.get('match')) {
+  if (urlParams.get('match') || urlParams.get('view') === 'watch') {
     document.getElementById('mode-select-view').style.display = 'none';
     enterWatchMode();
   }

@@ -135,6 +135,31 @@ router.get('/:matchId', async (req, res) => {
   res.json(result.rows[0]);
 });
 
+// Rename a match's teams after setup (e.g. fixing a typo, or a sponsor name
+// change). If match_name was still the auto-generated "A vs B" default, it's
+// regenerated with the new names too; a custom match_name is left alone.
+// Admin-only, like other match-editing/destructive actions.
+router.post('/:matchId/teams', requireAdminToken, async (req, res) => {
+  const { matchId } = req.params;
+  const teamAName = (req.body.team_a_name || '').trim();
+  const teamBName = (req.body.team_b_name || '').trim();
+  if (!teamAName || !teamBName) {
+    return res.status(400).json({ error: 'Both team names are required' });
+  }
+  const current = await pool.query('SELECT team_a_name, team_b_name, match_name FROM matches WHERE id=$1', [matchId]);
+  if (current.rows.length === 0) {
+    return res.status(404).json({ error: 'Match not found' });
+  }
+  const existing = current.rows[0];
+  const hadDefaultMatchName = existing.match_name === `${existing.team_a_name} vs ${existing.team_b_name}`;
+  const newMatchName = hadDefaultMatchName ? `${teamAName} vs ${teamBName}` : existing.match_name;
+  const result = await pool.query(
+    `UPDATE matches SET team_a_name=$1, team_b_name=$2, match_name=$3 WHERE id=$4 RETURNING *`,
+    [teamAName, teamBName, newMatchName, matchId]
+  );
+  res.json(result.rows[0]);
+});
+
 // Latest (most recent) innings for a match — used by watch mode to auto-follow
 router.get('/:matchId/current-innings', async (req, res) => {
   const result = await pool.query(

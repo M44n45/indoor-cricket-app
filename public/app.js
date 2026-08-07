@@ -1385,13 +1385,14 @@ async function loadAdminConsole() {
     const title = m.match_name || `${m.team_a_name} vs ${m.team_b_name}`;
     const whenBits = [formatDateOnly(m.match_date), m.match_time].filter(Boolean);
     const tossBit = m.toss_winner_team ? ` &middot; Toss done` : '';
-    return `<div class="card admin-match-card">
+    return `<div class="card admin-match-card" id="admin-match-card-${m.id}">
       <div class="admin-match-header">
         <div class="admin-match-title">${title}</div>
         <div class="helper-text">${whenBits.join(' &middot; ') || 'No date set'}${tossBit}</div>
       </div>
       <div class="admin-match-actions">
         <button class="btn btn-primary" onclick="continueScoring(${m.id})">Open &amp; Start</button>
+        <button class="btn btn-secondary" onclick="startEditTeamNames(${m.id})">Edit Names</button>
         <button class="btn btn-secondary admin-btn-danger" onclick="deleteMatch(${m.id})">Delete</button>
       </div>
     </div>`;
@@ -1401,7 +1402,7 @@ async function loadAdminConsole() {
     const title = m.match_name || `${m.team_a_name} vs ${m.team_b_name}`;
     const canResume = m.status === 'in_progress' || m.status === 'completed' || m.status === 'abandoned';
     const resumeLabel = m.status === 'in_progress' ? 'Continue Scoring' : 'Resume & Edit';
-    return `<div class="card admin-match-card">
+    return `<div class="card admin-match-card" id="admin-match-card-${m.id}">
       <div class="admin-match-header">
         <div class="admin-match-title">${title}</div>
         <div class="helper-text">Status: <b>${m.status}</b></div>
@@ -1409,10 +1410,12 @@ async function loadAdminConsole() {
       <div class="admin-match-actions">
         ${m.status === 'in_progress' ? `<button class="btn btn-primary" onclick="markMatchCompleted(${m.id})">Mark Completed</button>` : ''}
         ${canResume ? `<button class="btn btn-secondary" onclick="continueScoring(${m.id})">${resumeLabel}</button>` : ''}
+        <button class="btn btn-secondary" onclick="startEditTeamNames(${m.id})">Edit Names</button>
         <button class="btn btn-secondary admin-btn-danger" onclick="deleteMatch(${m.id})">Delete</button>
       </div>
     </div>`;
   }).join('');
+  state.adminMatchesCache = matches;
   const gear = document.getElementById('floating-admin-gear');
   if (gear) gear.style.display = 'none';
   document.getElementById('admin-view').innerHTML = `
@@ -1456,6 +1459,57 @@ async function loadAdminUsageStats() {
 
 async function markMatchCompleted(matchId) {
   await fetch(`${API}/matches/${matchId}/complete`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ winner_team: 'tie', result_summary: 'Marked completed from admin console' }) });
+  await loadAdminConsole();
+}
+
+function escapeHtmlAttr(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Swaps a match card into an inline "rename teams" form. Works for a match in
+// any status (setup, in progress, or completed) — it's just fixing a label,
+// not touching any scoring data.
+function startEditTeamNames(matchId) {
+  const match = (state.adminMatchesCache || []).find(m => m.id === matchId);
+  if (!match) return;
+  const card = document.getElementById(`admin-match-card-${matchId}`);
+  if (!card) return;
+  card.innerHTML = `
+    <div class="admin-match-header">
+      <div class="admin-match-title">Edit Team Names</div>
+      <div class="helper-text">Update the names for this match.</div>
+    </div>
+    <input type="text" id="edit-team-a-name-${matchId}" class="field" value="${escapeHtmlAttr(match.team_a_name || 'Team A')}" placeholder="Team A name" style="margin-top:8px;">
+    <input type="text" id="edit-team-b-name-${matchId}" class="field" value="${escapeHtmlAttr(match.team_b_name || 'Team B')}" placeholder="Team B name">
+    <div id="edit-team-names-error-${matchId}" style="color:#dc2626; font-size:12.5px; margin-bottom:6px; display:none;"></div>
+    <div class="admin-match-actions">
+      <button class="btn btn-primary" onclick="saveEditTeamNames(${matchId})">Save</button>
+      <button class="btn btn-secondary" onclick="loadAdminConsole()">Cancel</button>
+    </div>`;
+}
+
+async function saveEditTeamNames(matchId) {
+  const aEl = document.getElementById(`edit-team-a-name-${matchId}`);
+  const bEl = document.getElementById(`edit-team-b-name-${matchId}`);
+  const errEl = document.getElementById(`edit-team-names-error-${matchId}`);
+  const teamAName = aEl ? aEl.value.trim() : '';
+  const teamBName = bEl ? bEl.value.trim() : '';
+  if (!teamAName || !teamBName) {
+    if (errEl) { errEl.innerText = 'Both team names are required.'; errEl.style.display = 'block'; }
+    return;
+  }
+  const res = await fetch(`${API}/matches/${matchId}/teams`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-token': state.adminToken || '' },
+    body: JSON.stringify({ team_a_name: teamAName, team_b_name: teamBName })
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (errEl) { errEl.innerText = data.error || 'Could not save team names.'; errEl.style.display = 'block'; }
+    return;
+  }
   await loadAdminConsole();
 }
 

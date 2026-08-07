@@ -224,6 +224,7 @@ body{
 .team-roster-heading{font-size:13px; font-weight:700; color:var(--text); margin:0 0 8px; padding-bottom:6px; border-bottom:1px solid var(--border);}
 .team-roster-list{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px;}
 .team-roster-list li{font-size:13.5px; padding:4px 0;}
+.captain-badge{font-weight:700; color:var(--primary-dark); font-size:12px;}
 .clickable-row{cursor:pointer;}
 .clickable-row:active{background:rgba(30,86,201,0.08);}
 .watch-card-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-top:8px;}
@@ -583,6 +584,15 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
     <div id="teams-summary-content"></div>
   </div>
 
+  <div class="card" id="captains-card" style="display:none;">
+    <h2>Assign Captains</h2>
+    <p class="helper-text">Optional — pick a captain for each side. Shown on the scorecard and team roster.</p>
+    <span class="sub-label">Team A Captain</span>
+    <select id="team-a-captain-select" class="field" onchange="saveCaptain('A')"></select>
+    <span class="sub-label">Team B Captain</span>
+    <select id="team-b-captain-select" class="field" onchange="saveCaptain('B')"></select>
+  </div>
+
   <div id="attendance-assign-section">
   <div class="card compact-card">
     <h2>Step 1 · Who's Playing Today?</h2>
@@ -618,7 +628,8 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
   <div class="card" id="schedule-later-card" style="display:none;">
     <h2>Match Day Actions</h2>
     <p class="helper-text">Teams and settings are saved. Do the toss and start scoring whenever you're ready — no need to do it now.</p>
-    <button class="btn btn-secondary btn-full" onclick="backToModeSelect()">Save &amp; Schedule for Later</button>
+    <button class="btn btn-primary btn-full" onclick="scheduleAnotherMatch()">+ Schedule Another Match</button>
+    <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="backToModeSelect()">Save &amp; Schedule for Later</button>
   </div>
 
   <div class="card" id="start-innings-card" style="display:none;">

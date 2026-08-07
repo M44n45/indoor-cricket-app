@@ -25,6 +25,16 @@ async function initDb() {
   await pool.query(`ALTER TABLE matches ADD COLUMN IF NOT EXISTS toss_winner_team TEXT;`);
   await pool.query(`ALTER TABLE matches ADD COLUMN IF NOT EXISTS toss_decision TEXT;`);
 
+  // Migration: team captains. One captain can be assigned per team per match,
+  // chosen after teams are set. Enforced with a partial unique index so a
+  // second captain assignment for the same team automatically un-captains
+  // the first (handled in the route, not the DB), rather than allowing two.
+  await pool.query(`ALTER TABLE match_players ADD COLUMN IF NOT EXISTS is_captain BOOLEAN DEFAULT FALSE;`);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_match_players_one_captain_per_team
+    ON match_players(match_id, team) WHERE is_captain = TRUE;
+  `);
+
   const countRes = await pool.query('SELECT COUNT(*) FROM players');
   if (parseInt(countRes.rows[0].count) === 0) {
     // seed_players.sql is gitignored on purpose — it holds one specific

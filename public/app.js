@@ -29,6 +29,7 @@ function getDeviceId() {
 let state = {
   players: [], matchId: null, inningsId: null,
   swipeQueue: [], swipeIndex: 0, teamAIds: [], teamBIds: [],
+  teamACaptainId: null, teamBCaptainId: null,
   pendingExtraType: null,
   appMode: null, watchPollInterval: null, watchMatchId: null, watchInningsId: null, watchMatch: null,
   inningsCompletionHandled: false, overCompletedPendingBowlerChoice: null, lastOversCompleted: undefined, matchIsComplete: false,
@@ -467,8 +468,53 @@ function enterScorerMode() {
   if (gear) gear.style.display = 'none';
   const dateInput = document.getElementById('match-date');
   if (dateInput && !dateInput.value) dateInput.value = new Date().toLocaleDateString('en-CA');
+  resetSetupPanelsForNewMatch();
   showView('setup');
   loadPlayers();
+}
+
+// Puts the Setup screen back into its pre-match-creation state: the
+// attendance/team-assignment steps are shown again and the "match created"
+// cards (teams summary, captains, schedule-later, start-match) are hidden.
+// Used both when first entering Scorer mode and when the user wants to set
+// up another match right after creating one, without leaving the screen.
+function resetSetupPanelsForNewMatch() {
+  state.matchId = null;
+  state.teamACaptainId = null;
+  state.teamBCaptainId = null;
+  const attendance = document.getElementById('attendance-assign-section');
+  const addPlayer = document.getElementById('add-player-section');
+  const teamsSummary = document.getElementById('teams-summary-card');
+  const captainsCard = document.getElementById('captains-card');
+  const editToggle = document.getElementById('edit-teams-toggle-card');
+  const scheduleLater = document.getElementById('schedule-later-card');
+  const startInnings = document.getElementById('start-innings-card');
+  const matchStatus = document.getElementById('match-status');
+  const matchName = document.getElementById('match-name');
+  const shareBtn = document.getElementById('share-watch-btn');
+  if (attendance) attendance.style.display = 'block';
+  if (addPlayer) addPlayer.style.display = 'block';
+  if (teamsSummary) teamsSummary.style.display = 'none';
+  if (captainsCard) captainsCard.style.display = 'none';
+  if (editToggle) editToggle.style.display = 'none';
+  if (scheduleLater) scheduleLater.style.display = 'none';
+  if (startInnings) startInnings.style.display = 'none';
+  if (matchStatus) matchStatus.innerText = '';
+  if (matchName) matchName.value = '';
+  if (shareBtn) shareBtn.style.display = 'none';
+  resetTossUI(null);
+  toggleMatchSettings(false);
+}
+
+// Called from the "Schedule Another Match" button that appears right after
+// a match is created — lets the scorer set up several matches back-to-back
+// (e.g. a whole night's fixture list) without bouncing back to the mode
+// select screen in between.
+function scheduleAnotherMatch() {
+  resetSetupPanelsForNewMatch();
+  loadPlayers();
+  document.getElementById('match-status').innerText = 'Ready to set up your next match.';
+  window.scrollTo(0, 0);
 }
 
 function enterLeaderboardMode() {
@@ -743,7 +789,7 @@ function renderTeamsCard(containerId, teamAName, teamBName, teamAPlayers, teamBP
   const wasExpanded = existingBody ? !existingBody.classList.contains('collapsed') : false;
   const totalCount = (teamAPlayers.length || 0) + (teamBPlayers.length || 0);
   const listHtml = (players) => players.length
-    ? `<ul class="team-roster-list">${players.map(p => `<li class="clickable-name" onclick="showPlayerCard(${p.id})">${p.name}</li>`).join('')}</ul>`
+    ? `<ul class="team-roster-list">${players.map(p => `<li class="clickable-name" onclick="showPlayerCard(${p.id})">${p.name}${p.is_captain ? ' <span class="captain-badge" title="Captain">(C)</span>' : ''}</li>`).join('')}</ul>`
     : '<p class="helper-text">No players listed.</p>';
   container.innerHTML = `
     <div class="card">
@@ -1298,6 +1344,8 @@ async function continueScoring(matchId) {
       state.teamAIds = roster.team_a_player_ids || [];
       state.teamBIds = roster.team_b_player_ids || [];
       state.commonPlayerIds = roster.common_player_ids || [];
+      state.teamACaptainId = roster.team_a_captain_id || null;
+      state.teamBCaptainId = roster.team_b_captain_id || null;
       state.attendingIds = new Set([...state.teamAIds, ...state.teamBIds, ...state.commonPlayerIds]);
       // Cache roster for offline resume
       if (window.OfflineDB) OfflineDB.cacheSet('current_roster', roster);
@@ -1346,6 +1394,7 @@ async function continueScoring(matchId) {
     document.getElementById('attendance-assign-section').style.display = 'none';
     document.getElementById('add-player-section').style.display = 'none';
     document.getElementById('edit-teams-toggle-card').style.display = 'block';
+    renderCaptainsCard();
     renderTeamsSummary(match);
     resetTossUI(match);
     document.getElementById('sb-overs-limit').innerText = `${match.overs_limit} overs`;
@@ -1428,11 +1477,13 @@ async function loadFullScorecard() {
     const teamLabel = inn.innings.batting_team === 'A' ? 'Team A' : 'Team B';
     const battingRows = inn.batting.map(b => {
       const sr = b.balls_faced > 0 ? ((b.runs / b.balls_faced) * 100).toFixed(1) : '0.0';
-      return `<tr><td>${b.name}${b.status==='retired' ? ' (ret)' : b.status==='out' ? ' (out)' : ''}</td><td>${b.runs}</td><td>${b.balls_faced}</td><td>${b.fours}</td><td>${b.sixes}</td><td>${sr}</td></tr>`;
+      const nameLabel = `${b.name}${b.is_captain ? ' (C)' : ''}${b.status==='retired' ? ' (ret)' : b.status==='out' ? ' (out)' : ''}`;
+      return `<tr><td>${nameLabel}</td><td>${b.runs}</td><td>${b.balls_faced}</td><td>${b.fours}</td><td>${b.sixes}</td><td>${sr}</td></tr>`;
     }).join('');
     const bowlingRows = inn.bowling.map(b => {
       const econ = calcEconomy(b.runs_conceded, b.overs_bowled);
-      return `<tr><td>${b.name}</td><td>${b.overs_bowled}</td><td>${b.maidens || 0}</td><td>${b.runs_conceded}</td><td>${b.wickets}</td><td>${b.wides || 0}</td><td>${b.no_balls || 0}</td><td>${econ}</td></tr>`;
+      const nameLabel = `${b.name}${b.is_captain ? ' (C)' : ''}`;
+      return `<tr><td>${nameLabel}</td><td>${b.overs_bowled}</td><td>${b.maidens || 0}</td><td>${b.runs_conceded}</td><td>${b.wickets}</td><td>${b.wides || 0}</td><td>${b.no_balls || 0}</td><td>${econ}</td></tr>`;
     }).join('');
     const oversRecapHtml = (inn.overs_recap || []).map(over => {
       const pills = over.balls.map(b => {
@@ -1753,9 +1804,15 @@ function renderTeamsSummary(match) {
   const card = document.getElementById('teams-summary-card');
   const content = document.getElementById('teams-summary-content');
   if (!card || !content) return;
-  const teamANames = state.teamAIds.map(id => nameOf(id));
-  const teamBNames = state.teamBIds.map(id => nameOf(id));
-  const commonNames = state.commonPlayerIds.map(id => nameOf(id));
+  const nameWithCaptain = (id, captainId) => id === captainId ? `${nameOf(id)} (C)` : nameOf(id);
+  const teamANames = state.teamAIds.map(id => nameWithCaptain(id, state.teamACaptainId));
+  const teamBNames = state.teamBIds.map(id => nameWithCaptain(id, state.teamBCaptainId));
+  const commonNames = state.commonPlayerIds.map(id => {
+    const tags = [];
+    if (id === state.teamACaptainId) tags.push(`${match.team_a_name} C`);
+    if (id === state.teamBCaptainId) tags.push(`${match.team_b_name} C`);
+    return tags.length ? `${nameOf(id)} (${tags.join(', ')})` : nameOf(id);
+  });
   content.innerHTML = `
     <div style="margin-bottom:10px;">
       <span class="sub-label" style="color:var(--red);">${match.team_a_name}</span>
@@ -1771,6 +1828,42 @@ function renderTeamsSummary(match) {
     </div>` : ''}
   `;
   card.style.display = 'block';
+}
+
+// Populate the two captain dropdowns from the current team assignment, and
+// pre-select whichever captains are already saved for this match (if any).
+function renderCaptainsCard() {
+  const card = document.getElementById('captains-card');
+  if (!card) return;
+  const teamAOptions = [...state.teamAIds, ...(state.commonPlayerIds || [])];
+  const teamBOptions = [...state.teamBIds, ...(state.commonPlayerIds || [])];
+  const buildOptions = (ids, selectedId) => `<option value="">No captain</option>` +
+    ids.map(id => `<option value="${id}" ${id === selectedId ? 'selected' : ''}>${nameOf(id)}</option>`).join('');
+  document.getElementById('team-a-captain-select').innerHTML = buildOptions(teamAOptions, state.teamACaptainId);
+  document.getElementById('team-b-captain-select').innerHTML = buildOptions(teamBOptions, state.teamBCaptainId);
+  card.style.display = 'block';
+}
+
+async function saveCaptain(team) {
+  if (!state.matchId) return;
+  const selectId = team === 'A' ? 'team-a-captain-select' : 'team-b-captain-select';
+  const value = document.getElementById(selectId).value;
+  const playerId = value ? parseInt(value, 10) : null;
+  const res = await apiFetch(`${API}/matches/${state.matchId}/captain`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ team, player_id: playerId })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(err.error || 'Could not save captain.');
+    return;
+  }
+  if (team === 'A') state.teamACaptainId = playerId; else state.teamBCaptainId = playerId;
+  const match = {
+    team_a_name: document.getElementById('team-a-name').value || 'Team A',
+    team_b_name: document.getElementById('team-b-name').value || 'Team B'
+  };
+  renderTeamsSummary(match);
 }
 
 async function createMatch() {
@@ -1815,6 +1908,9 @@ async function createMatch() {
   document.getElementById('attendance-assign-section').style.display = 'none';
   document.getElementById('add-player-section').style.display = 'none';
   document.getElementById('edit-teams-toggle-card').style.display = 'block';
+  state.teamACaptainId = null;
+  state.teamBCaptainId = null;
+  renderCaptainsCard();
   renderTeamsSummary(match);
   resetTossUI(match);
   populateInningsSelectors();

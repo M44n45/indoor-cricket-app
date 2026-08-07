@@ -151,16 +151,22 @@ router.get('/:matchId/current-innings', async (req, res) => {
 // team-assignment state doesn't survive a fresh page/session.
 router.get('/:matchId/players', async (req, res) => {
   const result = await pool.query(
-    `SELECT mp.player_id, mp.team, p.name FROM match_players mp
+    `SELECT mp.player_id, mp.team, mp.is_captain, p.name FROM match_players mp
      JOIN players p ON p.id = mp.player_id WHERE mp.match_id=$1`,
     [req.params.matchId]
   );
   const aSet = new Set(), bSet = new Set();
   const names = {};
+  let teamACaptainId = null, teamBCaptainId = null;
   for (const row of result.rows) {
     names[row.player_id] = row.name;
-    if (row.team === 'A') aSet.add(row.player_id);
-    else if (row.team === 'B') bSet.add(row.player_id);
+    if (row.team === 'A') {
+      aSet.add(row.player_id);
+      if (row.is_captain) teamACaptainId = row.player_id;
+    } else if (row.team === 'B') {
+      bSet.add(row.player_id);
+      if (row.is_captain) teamBCaptainId = row.player_id;
+    }
   }
   const commonIds = [...aSet].filter(id => bSet.has(id));
   const commonSet = new Set(commonIds);
@@ -170,12 +176,54 @@ router.get('/:matchId/players', async (req, res) => {
   // watch/scorecard views) — common players appear on both sides since
   // they actually play for both teams.
   const byName = (a, b) => a.name.localeCompare(b.name);
-  const teamAPlayers = [...aSet].map(id => ({ id, name: names[id] })).sort(byName);
-  const teamBPlayers = [...bSet].map(id => ({ id, name: names[id] })).sort(byName);
+  const teamAPlayers = [...aSet].map(id => ({ id, name: names[id], is_captain: id === teamACaptainId })).sort(byName);
+  const teamBPlayers = [...bSet].map(id => ({ id, name: names[id], is_captain: id === teamBCaptainId })).sort(byName);
   res.json({
     team_a_player_ids: teamAIds, team_b_player_ids: teamBIds, common_player_ids: commonIds,
-    team_a_players: teamAPlayers, team_b_players: teamBPlayers
+    team_a_players: teamAPlayers, team_b_players: teamBPlayers,
+    team_a_captain_id: teamACaptainId, team_b_captain_id: teamBCaptainId
   });
+});
+
+// Assign (or clear) the captain for one team in a match. Pass player_id: null
+// to clear that team's captain. Assigning a new captain automatically
+// replaces any previous captain for the same team (only one at a time).
+router.post('/:matchId/captain', async (req, res) => {
+  const { matchId } = req.params;
+  const { team, player_id } = req.body;
+  if (!['A', 'B'].includes(team)) {
+    return res.status(400).json({ error: "team must be 'A' or 'B'" });
+  }
+  const pid = normalizeNullableInt(player_id);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      'UPDATE match_players SET is_captain=FALSE WHERE match_id=$1 AND team=$2',
+      [matchId, team]
+    );
+    if (pid !== null) {
+      const check = await client.query(
+        'SELECT id FROM match_players WHERE match_id=$1 AND player_id=$2 AND team=$3',
+        [matchId, pid, team]
+      );
+      if (check.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'That player is not on this team for this match.' });
+      }
+      await client.query(
+        'UPDATE match_players SET is_captain=TRUE WHERE match_id=$1 AND player_id=$2 AND team=$3',
+        [matchId, pid, team]
+      );
+    }
+    await client.query('COMMIT');
+    res.json({ success: true, team, captain_id: pid });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
 });
 
 router.get('/', async (req, res) => {

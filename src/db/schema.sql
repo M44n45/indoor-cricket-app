@@ -29,8 +29,13 @@ CREATE TABLE IF NOT EXISTS match_players (
   match_id INT REFERENCES matches(id) ON DELETE CASCADE,
   player_id INT REFERENCES players(id),
   team TEXT NOT NULL CHECK (team IN ('A','B')),
+  is_captain BOOLEAN DEFAULT FALSE,
   UNIQUE(match_id, player_id, team)
 );
+
+-- Only one captain per team per match.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_match_players_one_captain_per_team
+  ON match_players(match_id, team) WHERE is_captain = TRUE;
 
 CREATE TABLE IF NOT EXISTS innings (
   id SERIAL PRIMARY KEY,

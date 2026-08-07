@@ -553,15 +553,23 @@ router.get('/matches/:matchId/full-scorecard', async (req, res) => {
   );
   const result = [];
   for (const inn of inningsRes.rows) {
+    // is_captain is looked up per-team (not just per-player) since a common
+    // player can captain one side without being captain of the other.
     const batting = await pool.query(
-      `SELECT br.*, p.name FROM batting_records br JOIN players p ON p.id = br.player_id
+      `SELECT br.*, p.name, COALESCE(mp.is_captain, false) AS is_captain
+       FROM batting_records br
+       JOIN players p ON p.id = br.player_id
+       LEFT JOIN match_players mp ON mp.match_id=$2 AND mp.player_id=br.player_id AND mp.team=$3
        WHERE br.innings_id=$1 ORDER BY br.batting_order NULLS LAST`,
-      [inn.id]
+      [inn.id, matchId, inn.batting_team]
     );
     const bowling = await pool.query(
-      `SELECT bwr.*, p.name FROM bowling_records bwr JOIN players p ON p.id = bwr.player_id
+      `SELECT bwr.*, p.name, COALESCE(mp.is_captain, false) AS is_captain
+       FROM bowling_records bwr
+       JOIN players p ON p.id = bwr.player_id
+       LEFT JOIN match_players mp ON mp.match_id=$2 AND mp.player_id=bwr.player_id AND mp.team=$3
        WHERE bwr.innings_id=$1`,
-      [inn.id]
+      [inn.id, matchId, inn.bowling_team]
     );
     const bowlerExtras = await computeBowlerExtras(inn.id);
     const bowlingWithExtras = bowling.rows.map(b => ({

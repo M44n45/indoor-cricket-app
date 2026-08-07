@@ -32,10 +32,11 @@ CREATE TABLE IF NOT EXISTS match_players (
   is_captain BOOLEAN DEFAULT FALSE,
   UNIQUE(match_id, player_id, team)
 );
-
--- Only one captain per team per match.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_match_players_one_captain_per_team
-  ON match_players(match_id, team) WHERE is_captain = TRUE;
+-- Note: the "one captain per team" partial unique index is created in
+-- src/db/init.js, AFTER the is_captain migration ALTER TABLE runs — not
+-- here. On an existing database this CREATE TABLE is a no-op (table
+-- already exists), so putting the index here would try to reference
+-- is_captain before it's been added, breaking init for upgrades.
 
 CREATE TABLE IF NOT EXISTS innings (
   id SERIAL PRIMARY KEY,

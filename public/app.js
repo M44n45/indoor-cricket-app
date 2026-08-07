@@ -592,8 +592,21 @@ async function promptWatchMatchSelection() {
   const res = await fetch(`${API}/matches`);
   const matches = await res.json();
   const liveMatches = matches.filter(m => m.status === 'in_progress').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  const completedMatches = matches.filter(m => m.status === 'completed' || m.status === 'abandoned')
+    .sort((a, b) => new Date(b.match_date || b.created_at || b.updated_at || 0) - new Date(a.match_date || a.created_at || a.updated_at || 0));
   const scheduledMatches = matches.filter(m => m.status === 'setup')
     .sort((a, b) => new Date(`${a.match_date || a.created_at}T${a.match_time || '00:00'}`) - new Date(`${b.match_date || b.created_at}T${b.match_time || '00:00'}`));
+
+  const today = new Date();
+  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const todayCompleted = completedMatches.filter((m) => {
+    const rawDate = m.match_date || m.created_at;
+    if (!rawDate) return true;
+    const matchDate = new Date(rawDate);
+    if (Number.isNaN(matchDate.getTime())) return true;
+    return `${matchDate.getFullYear()}-${String(matchDate.getMonth() + 1).padStart(2, '0')}-${String(matchDate.getDate()).padStart(2, '0')}` === todayKey;
+  });
+  const olderCompleted = completedMatches.filter(m => !todayCompleted.some(c => c.id === m.id));
 
   const scheduledCardsHtml = scheduledMatches.map(m => {
     const title = m.match_name || `${m.team_a_name} vs ${m.team_b_name}`;
@@ -623,14 +636,8 @@ async function promptWatchMatchSelection() {
       </div>`;
   }).join('');
 
-  if (liveMatches.length === 0) {
-    document.getElementById('watch-view').innerHTML = `
-      <div class="card" style="margin-top:24px; text-align:center;"><p class="helper-text" style="text-align:center;">No match is currently in progress. Ask the scorer to start one, or check back soon.</p></div>
-      ${scheduledMatches.length ? `<div class="card"><h2>Scheduled</h2><p class="helper-text">These matches are set up and waiting to start.</p><div class="watch-card-grid">${scheduledCardsHtml}</div></div>` : ''}`;
-    return;
-  }
-  const cards = await Promise.all(liveMatches.map(async (m) => {
-    let score = 'Starting';
+  const renderMatchCard = async (m, kind = 'live') => {
+    let score = kind === 'completed' ? 'Final' : 'Starting';
     let overs = '';
     let liveLine = '';
     try {
@@ -643,7 +650,19 @@ async function promptWatchMatchSelection() {
         score = `${runs}/${wkts}`;
         overs = `${ov} ov`;
         liveLine = innings.innings_no === 2 ? 'Chase in progress' : 'Live score';
-        if (innings.innings_no === 2 && innings.id) {
+        if (kind === 'completed') {
+          if (m.result_summary) {
+            liveLine = m.result_summary;
+          } else if (m.winner_team === 'A') {
+            liveLine = `${m.team_a_name || 'Team A'} won`;
+          } else if (m.winner_team === 'B') {
+            liveLine = `${m.team_b_name || 'Team B'} won`;
+          } else if (m.winner_team === 'tie') {
+            liveLine = 'Match tied';
+          } else {
+            liveLine = 'Completed';
+          }
+        } else if (innings.innings_no === 2 && innings.id) {
           try {
             const scRes = await fetch(`${API}/innings/${innings.id}/scorecard`);
             const scData = scRes.ok ? await scRes.json() : null;
@@ -653,6 +672,18 @@ async function promptWatchMatchSelection() {
               liveLine = `Target ${target} &middot; Need ${needRuns}`;
             }
           } catch (e) {}
+        }
+      } else if (kind === 'completed') {
+        if (m.result_summary) {
+          liveLine = m.result_summary;
+        } else if (m.winner_team === 'A') {
+          liveLine = `${m.team_a_name || 'Team A'} won`;
+        } else if (m.winner_team === 'B') {
+          liveLine = `${m.team_b_name || 'Team B'} won`;
+        } else if (m.winner_team === 'tie') {
+          liveLine = 'Match tied';
+        } else {
+          liveLine = 'Completed';
         }
       }
     } catch (e) {}
@@ -674,16 +705,23 @@ async function promptWatchMatchSelection() {
           </div>
         </div>
         <div class="watch-card-title">${title}</div>
-        <div class="watch-card-bottom">${liveLine || 'Tap to view live score'}</div>
+        <div class="watch-card-bottom">${liveLine || (kind === 'completed' ? 'Tap to review match' : 'Tap to view live score')}</div>
       </button>`;
-  }));
+  };
+
+  const liveCards = await Promise.all(liveMatches.map(m => renderMatchCard(m, 'live')));
+  const todayCompletedCards = await Promise.all(todayCompleted.map(m => renderMatchCard(m, 'completed')));
+  const olderCompletedCards = await Promise.all(olderCompleted.map(m => renderMatchCard(m, 'completed')));
+
   document.getElementById('watch-view').innerHTML = `
     <div class="card" style="margin-top:24px;">
       <h2>Live Matches</h2>
       <p class="helper-text">Tap any match card to open the detailed live view.</p>
-      <div class="watch-card-grid">${cards.join('')}</div>
+      ${liveCards.length ? `<div class="watch-card-grid">${liveCards.join('')}</div>` : '<p class="helper-text">No matches are in progress right now.</p>'}
     </div>
-    ${scheduledMatches.length ? `<div class="card"><h2>Scheduled</h2><p class="helper-text">These matches are set up and waiting to start.</p><div class="watch-card-grid">${scheduledCardsHtml}</div></div>` : ''}`;
+    ${todayCompletedCards.length ? `<div class="card" style="margin-top:12px;"><h2>Completed Today</h2><div class="watch-card-grid">${todayCompletedCards.join('')}</div></div>` : ''}
+    ${olderCompletedCards.length ? `<details class="card" style="margin-top:12px;"><summary style="cursor:pointer; font-weight:700;">Earlier completed matches</summary><div class="watch-card-grid" style="margin-top:12px;">${olderCompletedCards.join('')}</div></details>` : ''}
+    ${scheduledMatches.length ? `<div class="card" style="margin-top:12px;"><h2>Scheduled</h2><p class="helper-text">These matches are set up and waiting to start.</p><div class="watch-card-grid">${scheduledCardsHtml}</div></div>` : ''}`;
 }
 
 function openWatchMatch(matchId) {

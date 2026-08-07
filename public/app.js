@@ -33,7 +33,8 @@ let state = {
   pendingExtraType: null,
   appMode: null, watchPollInterval: null, watchMatchId: null, watchInningsId: null, watchMatch: null,
   inningsCompletionHandled: false, overCompletedPendingBowlerChoice: null, lastOversCompleted: undefined, matchIsComplete: false,
-  isOffline: !navigator.onLine
+  isOffline: !navigator.onLine,
+  watchEventInningsId: undefined, watchEventOverNo: null, watchEventBallCount: 0
 };
 
 function scoringIsAllowed() {
@@ -559,6 +560,7 @@ function enterAboutMode() {
 
 function backToModeSelect() {
   if (state.watchPollInterval) clearInterval(state.watchPollInterval);
+  hideWatchEventOverlay();
   state.appMode = null;
   state.adminOpen = false;
   document.getElementById('watch-view').style.display = 'none';
@@ -759,11 +761,113 @@ async function resolveWatchInnings() {
 
 function startWatchPolling() {
   if (state.watchPollInterval) clearInterval(state.watchPollInterval);
+  resetWatchEventTracking();
   refreshWatchScorecard();
   state.watchPollInterval = setInterval(refreshWatchScorecard, 4000);
 }
 
 
+
+// ---- Watch Live: pop-up commentary for fours, sixes and wickets ----
+const WATCH_EVENT_PHRASES = {
+  four: ["Cracking shot — FOUR!", "Finds the gap perfectly!", "Four more on the board!", "Races away to the boundary!", "Superb timing — FOUR!"],
+  six: ["That's hit the roof!", "Into the stands — SIX!", "Massive hit — SIX!", "Out of the park!", "He's gone big — SIX!"],
+  wicket: ["He's gone!", "Bowled him!", "Huge wicket!", "Gotcha, that's out!", "Big breakthrough!"]
+};
+let watchEventQueue = [];
+let watchEventShowing = false;
+let watchEventHideTimer = null;
+
+function queueWatchEvent(type, label) {
+  watchEventQueue.push({ type, label });
+  processWatchEventQueue();
+}
+
+function processWatchEventQueue() {
+  if (watchEventShowing || watchEventQueue.length === 0) return;
+  watchEventShowing = true;
+  const { type, label } = watchEventQueue.shift();
+  renderWatchEventPopup(type, label);
+  setTimeout(() => {
+    watchEventShowing = false;
+    processWatchEventQueue();
+  }, 2500);
+}
+
+function renderWatchEventPopup(type, label) {
+  let overlay = document.getElementById('watch-event-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'watch-event-overlay';
+    overlay.className = 'watch-event-overlay';
+    overlay.innerHTML = `<div class="watch-event-circle" id="watch-event-circle"></div><div class="watch-event-text" id="watch-event-text"></div>`;
+    document.body.appendChild(overlay);
+  }
+  const circle = document.getElementById('watch-event-circle');
+  const textEl = document.getElementById('watch-event-text');
+  const phrases = WATCH_EVENT_PHRASES[type] || [];
+  circle.className = `watch-event-circle ${type}`;
+  circle.innerText = label;
+  textEl.innerText = phrases.length ? phrases[Math.floor(Math.random() * phrases.length)] : '';
+  overlay.classList.remove('show');
+  void overlay.offsetWidth; // restart animation
+  overlay.classList.add('show');
+  if (watchEventHideTimer) clearTimeout(watchEventHideTimer);
+  watchEventHideTimer = setTimeout(() => { overlay.classList.remove('show'); }, 2100);
+}
+
+function hideWatchEventOverlay() {
+  watchEventQueue = [];
+  watchEventShowing = false;
+  if (watchEventHideTimer) clearTimeout(watchEventHideTimer);
+  const overlay = document.getElementById('watch-event-overlay');
+  if (overlay) overlay.classList.remove('show');
+}
+
+function resetWatchEventTracking() {
+  state.watchEventInningsId = undefined;
+  state.watchEventOverNo = null;
+  state.watchEventBallCount = 0;
+  hideWatchEventOverlay();
+}
+
+// Compares the latest over's balls against what we saw last poll and pops up
+// a temporary "commentary" card for any new four, six or wicket.
+function detectWatchEvents(inningsId, oversRecap) {
+  const latest = oversRecap.length ? oversRecap[oversRecap.length - 1] : null;
+
+  // First time we see this innings (page just opened / switched match): just
+  // record where things stand, don't fire pop-ups for balls that already happened.
+  if (state.watchEventInningsId !== inningsId) {
+    state.watchEventInningsId = inningsId;
+    state.watchEventOverNo = latest ? latest.over_no : null;
+    state.watchEventBallCount = latest ? latest.balls.length : 0;
+    return;
+  }
+
+  if (!latest) return;
+
+  let newBalls = [];
+  if (state.watchEventOverNo === latest.over_no) {
+    if (latest.balls.length > state.watchEventBallCount) {
+      newBalls = latest.balls.slice(state.watchEventBallCount);
+    }
+  } else {
+    // Over has moved on since the last poll — treat every ball in the new
+    // over as new (the rare ball that lands exactly on an over change may be
+    // missed, which is an acceptable trade-off for a 4s poll).
+    newBalls = latest.balls.slice();
+  }
+
+  state.watchEventOverNo = latest.over_no;
+  state.watchEventBallCount = latest.balls.length;
+
+  newBalls.forEach(b => {
+    if (b.is_wicket) queueWatchEvent('wicket', 'W');
+    else if (b.runs === 6 && !b.extra_type) queueWatchEvent('six', '6');
+    else if (b.runs === 4 && !b.extra_type) queueWatchEvent('four', '4');
+  });
+}
 
 function ensureWatchScorecardShell() {
   const view = document.getElementById('watch-view');
@@ -945,6 +1049,7 @@ async function refreshWatchScorecard() {
   const bowling = Array.isArray(data.bowling) ? data.bowling : [];
   const fow = Array.isArray(data.fall_of_wickets) ? data.fall_of_wickets : [];
   const oversRecap = Array.isArray(data.overs_recap) ? data.overs_recap : [];
+  detectWatchEvents(state.watchInningsId, oversRecap);
   const match = state.watchMatch || {};
   const runs = Number(innings.total_runs || 0);
   const wickets = Number(innings.total_wickets || 0);
@@ -1079,6 +1184,7 @@ function backToWatchMatchList() {
   state.watchMatchId = null;
   state.watchInningsId = null;
   state.watchMatch = null;
+  hideWatchEventOverlay();
   if (state.watchPollInterval) { clearInterval(state.watchPollInterval); state.watchPollInterval = null; }
   const banner = document.getElementById('watch-winner-banner');
   const backCard = document.getElementById('watch-back-to-list-card');
@@ -1129,6 +1235,7 @@ function teamColorCss(name, fallback) {
 
 function backToModeSelectFromWatch() {
   if (state.watchPollInterval) { clearInterval(state.watchPollInterval); state.watchPollInterval = null; }
+  hideWatchEventOverlay();
   state.watchMatchId = null;
   state.watchInningsId = null;
   state.watchMatch = null;

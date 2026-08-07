@@ -532,7 +532,8 @@ function enterWatchMode() {
   state.appMode = 'watcher';
   document.getElementById('mode-select-view').style.display = 'none';
   document.getElementById('main-tabbar').style.display = 'none';
-  document.getElementById('share-watch-btn').style.display = 'none';
+  const shareBtn = document.getElementById('share-watch-btn');
+  if (shareBtn) shareBtn.style.display = 'block';
   document.getElementById('setup-view').style.display = 'none';
   document.getElementById('score-view').style.display = 'none';
   document.getElementById('leaderboard-view').style.display = 'none';
@@ -1095,13 +1096,25 @@ function backToWatchMatchList() {
 
 
 function shareWatchLink() {
-  if (!state.matchId) { alert('Start a match first.'); return; }
-  const url = `${window.location.origin}${window.location.pathname}?match=${state.matchId}`;
+  const baseUrl = `${window.location.origin}${window.location.pathname}`;
+  const url = `${baseUrl}?view=watch`;
+
+  const copyLink = () => {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(() => {
+        alert('Watch page link copied to clipboard:\n' + url);
+      }).catch(() => {
+        alert(url);
+      });
+      return;
+    }
+    alert(url);
+  };
+
   if (navigator.share) {
-    navigator.share({ title: 'Follow the live score', url });
+    navigator.share({ title: 'Watch live matches', text: 'Open the live matches page', url }).catch(() => copyLink());
   } else {
-    navigator.clipboard.writeText(url);
-    alert('Watch link copied to clipboard:\n' + url);
+    copyLink();
   }
 }
 

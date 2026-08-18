@@ -1,64 +1,49 @@
-v0.994 UPDATE
-=============
-1) Mid-match team/roster editing + convert-to-Common
-   New "✏️ Edit Players / Teams" button on the Live Score screen reopens
-   the same attendance + team-assignment UI used at setup, now usable once
-   a match (and even an innings) is already in progress. You can add a
-   replacement player, remove a no-show, or tap a player through to
-   "Common" to have them cover both sides — same one-Common-Player-per-
-   match rule as before.
+v0.993 UPDATE — Confirm before repeating the same bowler back-to-back
+========================================================================
+Added a confirmation prompt when the bowler picked for the next over is
+the same one who just bowled the over that ended — covers both the plain
+"over complete" bowler picker and the "wicket & over complete" combined
+batsman+bowler picker (they're two separate modals in the code, same
+underlying situation). Picking any other bowler still submits immediately
+with no prompt, same as before.
 
-   Backend: new PUT /api/matches/:matchId/players (src/routes/matches.js)
-   diffs the submitted rosters against match_players instead of wiping and
-   re-inserting:
-     - Newly added players get a match_players row; if the match has an
-       innings currently in_progress and their team is batting/bowling in
-       it, a matching batting_records ('yet_to_bat') / bowling_records row
-       is created too, so they're immediately selectable as striker/
-       bowler/fielder — no stats are ever touched for players who were
-       already on the roster.
-     - Removed players simply lose their match_players row. Any stats
-       they've already recorded are never deleted. If they hadn't faced or
-       bowled a ball yet in the live innings (a still-empty record — the
-       no-show case), that empty placeholder is cleaned up so they drop
-       out of the pickers. The current striker/bowler is left alone even
-       if removed — change them first.
+Implementation: new shared confirmSameBowlerIfNeeded() helper, gated on a
+new state.pendingOverBowlerId (the bowler who just finished their over),
+called right before the change-bowler API request fires in both
+confirmNextBowler() and confirmNextBatsmanAndBowler(). Cancelling leaves
+the modal open with no request sent, so the scorer can pick someone else.
 
-   Also fixed a latent bug this touched: opening "Edit Players / Teams" on
-   a match that was already created (via the pre-start toggle, or the new
-   mid-match button) previously still hit "Create Match", which would have
-   silently created a *second* match instead of updating the existing one.
-   The button now shows "Save Team Changes" and calls the new endpoint
-   whenever a match already exists.
+Bumped: app.js cache-busting query string to ?v=84, sw.js CACHE_NAME to
+v23.
 
-2) Fixed: opening the Scorecard tab directly showed a blank scorecard
-   Root cause: showView('scorecard') with no match in mind auto-selected
-   whichever match sorted first (newest by created_at) and loaded its
-   full-scorecard — including matches still in 'setup' status with no
-   innings yet, which returns an empty scorecard.
-   Fix: the Scorecard tab now shows a tile picker (same card style as
-   Match History, with live/final scores) when opened with no match
-   context, and only loads the detail view once a match is tapped —
-   scheduled/not-yet-started matches are excluded from the picker so they
-   can't be auto-selected blank again. Opening a specific match's
-   scorecard (from Match History or Watch Live) still goes straight to
-   the detail view as before.
-   (public/app.js, public/index.html)
+(public/app.js, public/index.html, public/sw.js)
 
-3) Fixed: the Teams roster card (Watch Live / Scorecard) didn't collapse
-   smoothly
-   .roster-collapsible was transitioning max-height from a fixed 1000px
-   down to 0 over 0.25s regardless of actual content size — for a normal
-   roster (a few hundred px tall) the animation spent most of its 0.25s
-   in empty range, so it read as stalling and then snapping shut instead
-   of collapsing smoothly.
-   Fix: renderTeamsCard()/toggleRosterCard() now set an inline max-height
-   from the element's real scrollHeight instead of relying on the fixed
-   CSS value, so the transition always matches the actual content height.
-   (public/app.js, public/index.html)
+v0.992 UPDATE — Watch Live: completed match showed no scorecard
+=================================================================
+Fixed: opening a completed (or abandoned) match from Watch Live — e.g. via
+"Earlier completed matches" or a shared match link — showed the winner
+banner ("Team A won") but the score, overs, batting and bowling tables
+stayed on their empty placeholder state (0/0, 0.0 ov, no rows).
+
+Root cause: refreshWatchScorecard() (public/app.js) branches early for
+matches with status 'completed'/'abandoned' — it sets the winner banner,
+stops polling, and `return`s. But all the code that actually fetches the
+innings scorecard and renders score/overs/batting/bowling/fall-of-wickets
+lives *after* that branch, so it never ran for a completed match. The
+scoreboard shell (built fresh by ensureWatchScorecardShell()) was left on
+its static default markup the whole time.
+
+Fix: removed the early `return`. The banner still shows and polling still
+stops (since a completed match's result won't change), but execution now
+falls through to fetch current-innings + /scorecard and render the final
+state, exactly as it already does for in-progress matches. No other
+behavior changes — in-progress matches are unaffected.
 
 Bumped: app.js cache-busting query string to ?v=83, sw.js CACHE_NAME to
-v22, visible version badge to v0.994.
+v22.
+
+(public/app.js, public/index.html, public/sw.js)
+
 UPDATE - FILES CHANGED THIS ROUND
 ==================================
 

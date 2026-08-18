@@ -1,3 +1,60 @@
+RESTORED (post-0.993) — Mid-match team/roster editing + convert-to-Common
+===========================================================================
+Ported back from the v0.994 build, which this branch had been forked
+before. New "✏️ Edit Players / Teams" button on the Live Score screen
+reopens the same attendance + team-assignment UI used at setup, now usable
+once a match (and even an innings) is already in progress. You can add a
+replacement player, remove a no-show, or tap a player through to "Common"
+to have them cover both sides — same one-Common-Player-per-match rule as
+before.
+
+Backend: new PUT /api/matches/:matchId/players (src/routes/matches.js)
+diffs the submitted rosters against match_players instead of wiping and
+re-inserting:
+  - Newly added players get a match_players row; if the match has an
+    innings currently in_progress and their team is batting/bowling in
+    it, a matching batting_records ('yet_to_bat') / bowling_records row
+    is created too, so they're immediately selectable as striker/
+    bowler/fielder — no stats are ever touched for players who were
+    already on the roster.
+  - Removed players simply lose their match_players row. Any stats
+    they've already recorded are never deleted. If they hadn't faced or
+    bowled a ball yet in the live innings (a still-empty record — the
+    no-show case), that empty placeholder is cleaned up so they drop
+    out of the pickers. The current striker/bowler is left alone even
+    if removed — change them first.
+
+Also fixed a latent bug this touched: opening "Edit Players / Teams" on
+a match that was already created (via the pre-start toggle, or the new
+mid-match button) previously still hit "Create Match", which would have
+silently created a *second* match instead of updating the existing one.
+The button now shows "Save Team Changes" and calls the new endpoint
+whenever a match already exists.
+
+(public/index.html, public/app.js, src/routes/matches.js)
+
+Bumped: app.js cache-busting query string to ?v=86, sw.js CACHE_NAME to
+v25.
+
+Also ported from v0.994 in the same pass, since you asked for these too:
+
+- Scorecard tab blank-picker fix: opening the Scorecard tab directly used
+  to show whichever match sorted first (newest by created_at), including
+  matches still in 'setup' with no innings yet — which rendered a blank
+  scorecard. The tab now shows a tile picker (same card style as Match
+  History) when opened with no match in mind, and only loads the detail
+  view once a match is tapped. Opening a specific match's scorecard (from
+  Match History or Watch Live) still goes straight to the detail view.
+  (public/app.js, public/index.html)
+
+- Teams roster card (Watch Live / Scorecard) collapse animation smoothing:
+  it was transitioning max-height from a fixed 1000px down to 0, which for
+  a normal-sized roster spent most of the 0.25s transitioning through
+  empty range — reading as a stall then a snap shut instead of a smooth
+  collapse. renderTeamsCard()/toggleRosterCard() now set an inline
+  max-height from the element's real scrollHeight instead.
+  (public/app.js)
+
 v0.993 UPDATE — Confirm before repeating the same bowler back-to-back
 ========================================================================
 Added a confirmation prompt when the bowler picked for the next over is

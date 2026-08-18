@@ -318,4 +318,126 @@ router.delete('/:matchId', requireAdminToken, async (req, res) => {
   res.json({ success: true });
 });
 
+// Update a match's team roster — including after the match has already
+// started. Body: { team_a_player_ids: [...], team_b_player_ids: [...] }
+// (a player id present in BOTH arrays is a Common Player, same convention
+// used at match creation). This diffs against the current match_players
+// rows rather than wiping and re-inserting, so it works safely mid-match:
+//
+// - Newly added players are inserted into match_players. If the match has
+//   an innings currently in_progress and the newly-added player's team is
+//   batting or bowling in that innings, a batting_records / bowling_records
+//   row is also created for them (status 'yet_to_bat' for batting) so they
+//   immediately show up as selectable — this is what lets you convert an
+//   existing player to a Common Player (add them to the other team too) or
+//   bring on a replacement mid-game.
+// - Removed players just lose their match_players eligibility row. Any
+//   batting/bowling stats they've already recorded are left completely
+//   alone (never deleted). If they hadn't faced a ball / bowled a ball yet
+//   in the current innings (a still-empty 'yet_to_bat' / 0-for-0 record —
+//   e.g. a no-show), that empty placeholder record is cleaned up too, so
+//   they drop out of the striker/bowler pickers. A player currently at the
+//   crease or bowling is left untouched even if removed from the roster —
+//   change the striker/bowler first.
+router.put('/:matchId/players', async (req, res) => {
+  const { matchId } = req.params;
+  const toIntArray = (v) => Array.isArray(v) ? [...new Set(v.map(x => parseInt(x, 10)).filter(Number.isFinite))] : [];
+  const teamAIds = toIntArray(req.body.team_a_player_ids);
+  const teamBIds = toIntArray(req.body.team_b_player_ids);
+  if (teamAIds.length === 0 || teamBIds.length === 0) {
+    return res.status(400).json({ error: 'Both teams need at least one player.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const existing = await client.query('SELECT player_id, team FROM match_players WHERE match_id=$1', [matchId]);
+    if (existing.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Match not found (or has no players yet — use match creation instead).' });
+    }
+    const existingA = new Set(existing.rows.filter(r => r.team === 'A').map(r => r.player_id));
+    const existingB = new Set(existing.rows.filter(r => r.team === 'B').map(r => r.player_id));
+    const newA = new Set(teamAIds);
+    const newB = new Set(teamBIds);
+
+    const removedA = [...existingA].filter(id => !newA.has(id));
+    const removedB = [...existingB].filter(id => !newB.has(id));
+    const addedA = [...newA].filter(id => !existingA.has(id));
+    const addedB = [...newB].filter(id => !existingB.has(id));
+
+    for (const pid of removedA) {
+      await client.query('DELETE FROM match_players WHERE match_id=$1 AND player_id=$2 AND team=$3', [matchId, pid, 'A']);
+    }
+    for (const pid of removedB) {
+      await client.query('DELETE FROM match_players WHERE match_id=$1 AND player_id=$2 AND team=$3', [matchId, pid, 'B']);
+    }
+    for (const pid of addedA) {
+      await client.query(
+        `INSERT INTO match_players (match_id, player_id, team) VALUES ($1,$2,'A') ON CONFLICT (match_id, player_id, team) DO NOTHING`,
+        [matchId, pid]
+      );
+    }
+    for (const pid of addedB) {
+      await client.query(
+        `INSERT INTO match_players (match_id, player_id, team) VALUES ($1,$2,'B') ON CONFLICT (match_id, player_id, team) DO NOTHING`,
+        [matchId, pid]
+      );
+    }
+
+    // Keep the currently-live innings (if any) in sync so newly-added
+    // players are immediately eligible, and cleanly-removed no-shows drop out.
+    const inningsRes = await client.query(
+      `SELECT id, striker_id, bowler_id, batting_team, bowling_team FROM innings WHERE match_id=$1 AND status='in_progress'`,
+      [matchId]
+    );
+    for (const inn of inningsRes.rows) {
+      const battingAdds = inn.batting_team === 'A' ? addedA : addedB;
+      const bowlingAdds = inn.bowling_team === 'A' ? addedA : addedB;
+      const battingRemoves = inn.batting_team === 'A' ? removedA : removedB;
+      const bowlingRemoves = inn.bowling_team === 'A' ? removedA : removedB;
+
+      for (const pid of battingAdds) {
+        await client.query(
+          `INSERT INTO batting_records (innings_id, player_id, status) VALUES ($1,$2,'yet_to_bat')
+           ON CONFLICT (innings_id, player_id) DO NOTHING`,
+          [inn.id, pid]
+        );
+      }
+      for (const pid of bowlingAdds) {
+        await client.query(
+          `INSERT INTO bowling_records (innings_id, player_id) VALUES ($1,$2)
+           ON CONFLICT (innings_id, player_id) DO NOTHING`,
+          [inn.id, pid]
+        );
+      }
+      for (const pid of battingRemoves) {
+        if (pid === inn.striker_id) continue; // currently batting — leave alone
+        await client.query(
+          `DELETE FROM batting_records
+           WHERE innings_id=$1 AND player_id=$2 AND status='yet_to_bat' AND runs=0 AND balls_faced=0 AND retirement_count=0`,
+          [inn.id, pid]
+        );
+      }
+      for (const pid of bowlingRemoves) {
+        if (pid === inn.bowler_id) continue; // currently bowling — leave alone
+        await client.query(
+          `DELETE FROM bowling_records
+           WHERE innings_id=$1 AND player_id=$2 AND overs_bowled=0 AND runs_conceded=0 AND wickets=0`,
+          [inn.id, pid]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, added: { A: addedA, B: addedB }, removed: { A: removedA, B: removedB } });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;

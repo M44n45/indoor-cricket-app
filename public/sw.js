@@ -1,6 +1,6 @@
 // sw.js — app-shell caching for the CageCricket Live PWA.
 // Bump CACHE_NAME whenever index.html/app.js change so old clients pick up the update.
-const CACHE_NAME = 'cricket-scorer-v23';
+const CACHE_NAME = 'cricket-scorer-v25';
 const APP_SHELL = [
   '/',
   '/index.html',

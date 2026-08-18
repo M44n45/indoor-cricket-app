@@ -483,6 +483,7 @@ function resetSetupPanelsForNewMatch() {
   state.matchId = null;
   state.teamACaptainId = null;
   state.teamBCaptainId = null;
+  state.editingFromScore = false;
   const attendance = document.getElementById('attendance-assign-section');
   const addPlayer = document.getElementById('add-player-section');
   const teamsSummary = document.getElementById('teams-summary-card');
@@ -493,6 +494,7 @@ function resetSetupPanelsForNewMatch() {
   const matchStatus = document.getElementById('match-status');
   const matchName = document.getElementById('match-name');
   const shareBtn = document.getElementById('share-watch-btn');
+  const backBtn = document.getElementById('back-to-score-btn');
   if (attendance) attendance.style.display = 'block';
   if (addPlayer) addPlayer.style.display = 'block';
   if (teamsSummary) teamsSummary.style.display = 'none';
@@ -503,8 +505,10 @@ function resetSetupPanelsForNewMatch() {
   if (matchStatus) matchStatus.innerText = '';
   if (matchName) matchName.value = '';
   if (shareBtn) shareBtn.style.display = 'none';
+  if (backBtn) backBtn.style.display = 'none';
   resetTossUI(null);
   toggleMatchSettings(false);
+  updateCreateMatchButtonLabel();
 }
 
 // Called from the "Schedule Another Match" button that appears right after
@@ -953,6 +957,13 @@ function renderTeamsCard(containerId, teamAName, teamBName, teamAPlayers, teamBP
         </div>
       </div>
     </div>`;
+  // Drive the collapse transition off the content's real height instead of
+  // a large fixed max-height. A fixed max-height (e.g. 1000px) transitions
+  // through mostly-empty range for any normal-sized roster, which reads as
+  // the card not collapsing properly (a long pause, then a sudden snap)
+  // rather than a smooth close.
+  const body = document.getElementById(bodyId);
+  if (body) body.style.maxHeight = wasExpanded ? `${body.scrollHeight}px` : '0px';
 }
 
 function toggleRosterCard(containerId) {
@@ -961,6 +972,7 @@ function toggleRosterCard(containerId) {
   if (!body) return;
   const collapsed = body.classList.toggle('collapsed');
   if (chevron) chevron.classList.toggle('expanded', !collapsed);
+  body.style.maxHeight = collapsed ? '0px' : `${body.scrollHeight}px`;
 }
 
 async function loadTeamsForMatch(matchId, containerId, teamAName, teamBName) {
@@ -1660,7 +1672,7 @@ function showView(view, contextMatchId) {
   document.getElementById('topbar-title').innerText = titles[view];
   if (view === 'stats') { loadMatchHistory(); }
   if (view === 'leaderboard') { loadLeaderboard(); }
-  if (view === 'scorecard') { loadMatchListForScorecard(contextMatchId); }
+  if (view === 'scorecard') { loadScorecardTab(contextMatchId); }
   if (view === 'score') {
     const banner = document.getElementById('sb-winner-banner');
     if (banner) banner.style.display = 'none';
@@ -1669,6 +1681,53 @@ function showView(view, contextMatchId) {
   window.scrollTo(0, 0);
 }
 
+
+// Entry point for the Scorecard tab. Opened with a specific match in mind
+// (tapped a card in Match History, or came from Watch Live) -> go straight
+// to that match's detail view. Opened directly (tapped the bottom-nav
+// Scorecard tab itself, with no match in mind yet) -> show the tile picker
+// first instead of silently defaulting to whichever match happens to sort
+// first (which, if that was a still-unstarted scheduled match, is exactly
+// how this used to render a blank scorecard).
+async function loadScorecardTab(preferredMatchId) {
+  const pickerCard = document.getElementById('scorecard-picker-card');
+  const detail = document.getElementById('scorecard-detail-container');
+  if (preferredMatchId != null) {
+    if (pickerCard) pickerCard.style.display = 'none';
+    if (detail) detail.style.display = 'block';
+    await loadMatchListForScorecard(preferredMatchId);
+    return;
+  }
+  if (pickerCard) pickerCard.style.display = 'block';
+  if (detail) detail.style.display = 'none';
+  await renderScorecardPicker();
+}
+
+async function renderScorecardPicker() {
+  const container = document.getElementById('scorecard-picker-container');
+  if (!container) return;
+  container.innerHTML = '<p class="helper-text">Loading matches...</p>';
+  const res = await fetch(`${API}/stats/matches-history`);
+  const allRows = await res.json();
+  // Scheduled ('setup') matches have no innings yet, so there's nothing to
+  // show a scorecard for — leaving them out here is what actually fixes the
+  // blank-scorecard bug (previously the dropdown defaulted to whichever
+  // match sorted first, setup or not).
+  const relevant = (allRows || []).filter(r => r.status !== 'setup');
+  if (relevant.length === 0) {
+    container.innerHTML = '<p class="helper-text">No matches yet.</p>';
+    return;
+  }
+  container.innerHTML = `<div class="watch-card-grid">${relevant.map(renderHistoryCard).join('')}</div>`;
+}
+
+function backToScorecardPicker() {
+  const pickerCard = document.getElementById('scorecard-picker-card');
+  const detail = document.getElementById('scorecard-detail-container');
+  if (detail) detail.style.display = 'none';
+  if (pickerCard) pickerCard.style.display = 'block';
+  renderScorecardPicker();
+}
 
 async function loadMatchListForScorecard(preferredMatchId) {
   const res = await fetch(`${API}/matches`);
@@ -2015,6 +2074,95 @@ function toggleAttendanceAssignSection() {
   section.style.display = isHidden ? 'block' : 'none';
   addPlayerSection.style.display = isHidden ? 'block' : 'none';
   label.innerText = isHidden ? '✕ Close Editing' : '✏️ Edit Players / Teams';
+  updateCreateMatchButtonLabel();
+}
+
+// The bottom button of the team-assignment step does double duty: "Create
+// Match" for a brand-new match, "Save Team Changes" for editing the roster
+// of a match that already exists (pre-start editing via the toggle above,
+// or mid-match editing via openTeamEditorFromScore()).
+function updateCreateMatchButtonLabel() {
+  const btn = document.getElementById('create-match-btn');
+  if (btn) btn.innerText = state.matchId ? 'Save Team Changes' : 'Create Match';
+}
+
+function handleCreateOrSaveMatch() {
+  if (state.matchId) {
+    saveTeamAssignment();
+  } else {
+    createMatch();
+  }
+}
+
+// Saves roster changes for a match that already exists — including one
+// that's already in progress. Adds/removes players (or turns an existing
+// player into the Common Player) without touching any stats already
+// recorded; see PUT /matches/:matchId/players for the details.
+async function saveTeamAssignment() {
+  const teamAPlayerIds = [...state.teamAIds, ...state.commonPlayerIds];
+  const teamBPlayerIds = [...state.teamBIds, ...state.commonPlayerIds];
+  if (teamAPlayerIds.length < 2 || teamBPlayerIds.length < 2) {
+    document.getElementById('match-status').innerText = 'Assign at least a few players to each team first.';
+    return;
+  }
+  const res = await apiFetch(`${API}/matches/${state.matchId}/players`, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ team_a_player_ids: teamAPlayerIds, team_b_player_ids: teamBPlayerIds })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    document.getElementById('match-status').innerText = err.error || 'Could not save team changes.';
+    return;
+  }
+  if (window.OfflineDB) {
+    OfflineDB.cacheSet('current_roster', {
+      team_a_player_ids: state.teamAIds,
+      team_b_player_ids: state.teamBIds,
+      common_player_ids: state.commonPlayerIds || []
+    });
+  }
+  document.getElementById('match-status').innerText = 'Team changes saved.';
+  renderCaptainsCard();
+  if (state.editingFromScore) {
+    cancelTeamEditFromScore();
+  }
+}
+
+// Opens the Setup screen's attendance/team-assignment steps for editing the
+// roster of the match currently being scored, then returns to Live Score.
+function openTeamEditorFromScore() {
+  state.editingFromScore = true;
+  document.getElementById('attendance-assign-section').style.display = 'block';
+  document.getElementById('add-player-section').style.display = 'block';
+  const teamsSummary = document.getElementById('teams-summary-card');
+  const captainsCard = document.getElementById('captains-card');
+  const startInnings = document.getElementById('start-innings-card');
+  const scheduleLater = document.getElementById('schedule-later-card');
+  const editToggle = document.getElementById('edit-teams-toggle-card');
+  if (teamsSummary) teamsSummary.style.display = 'none';
+  if (captainsCard) captainsCard.style.display = 'none';
+  if (startInnings) startInnings.style.display = 'none';
+  if (scheduleLater) scheduleLater.style.display = 'none';
+  if (editToggle) editToggle.style.display = 'none';
+  toggleMatchSettings(true);
+  const backBtn = document.getElementById('back-to-score-btn');
+  if (backBtn) backBtn.style.display = 'block';
+  updateCreateMatchButtonLabel();
+  showView('setup');
+  renderAttendanceList();
+  renderTeamAssignList();
+  document.getElementById('match-status').innerText = "Editing players for the match in progress — stats already recorded are kept.";
+}
+
+function cancelTeamEditFromScore() {
+  state.editingFromScore = false;
+  const backBtn = document.getElementById('back-to-score-btn');
+  if (backBtn) backBtn.style.display = 'none';
+  if (state.inningsId) {
+    state.currentBowlingTeamIds = (state.currentBattingTeam === 'A' ? state.teamBIds : state.teamAIds).concat(state.commonPlayerIds || []);
+    refreshScorecard(true);
+  }
+  showView('score');
 }
 
 function renderTeamsSummary(match) {
@@ -2109,6 +2257,7 @@ async function createMatch() {
   });
   const match = await res.json();
   state.matchId = match.id;
+  updateCreateMatchButtonLabel();
   // Cache for offline reads (innings start, scorecard, etc.)
   if (window.OfflineDB) {
     OfflineDB.cacheSet('current_match', match);

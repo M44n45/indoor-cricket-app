@@ -587,4 +587,8 @@ router.get('/matches/:matchId/full-scorecard', async (req, res) => {
   res.json(result);
 });
 
+// Exported so other routers (e.g. matches.js) can recompute an innings from
+// ball_events after a targeted correction (e.g. fixing a single over).
+router.replayInnings = replayInnings;
+
 module.exports = router;

@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db/pool');
 const { requireAdminToken } = require('./admin');
+const { replayInnings } = require('./scoring');
 
 function normalizeNullableInt(value) {
   if (value === null || value === undefined) return null;
@@ -249,6 +250,139 @@ router.post('/innings/:inningsId/correct-bowler', requireAdminToken, async (req,
     if (innings.bowler_id === oldPlayerId) {
       await client.query('UPDATE innings SET bowler_id=$1 WHERE id=$2', [newPlayerId, inningsId]);
     }
+
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// --- Per-over scoring corrections ------------------------------------------
+// Unlike correct-batsman/correct-bowler above (which move every stat for a
+// player across the WHOLE innings — e.g. the wrong person was selected the
+// entire time), these fix a single over: the bowler recorded for over 4 was
+// actually someone else, or the striker facing over 6 was actually someone
+// else, while every other over is left completely alone. Both old and new
+// player may already have their own (correct) records elsewhere in this
+// innings, so — unlike the whole-innings correction — we can't just rename
+// a whole record; instead we edit only the affected ball_events rows for
+// that over, then fully replay the innings from ball_events (the same
+// routine undo uses) so every derived total, dismissal, and fall-of-wicket
+// entry stays consistent. Admin-gated, like the other after-the-fact edits.
+
+// Replace the bowler for one specific over. One bowler bowls a whole over,
+// so this moves every ball in that over from old_bowler_id to new_bowler_id.
+router.post('/innings/:inningsId/overs/:overNo/correct-bowler', requireAdminToken, async (req, res) => {
+  const { inningsId, overNo } = req.params;
+  const oldBowlerId = normalizeNullableInt(req.body.old_bowler_id);
+  const newBowlerId = normalizeNullableInt(req.body.new_bowler_id);
+  if (!oldBowlerId || !newBowlerId) {
+    return res.status(400).json({ error: 'old_bowler_id and new_bowler_id are required' });
+  }
+  if (oldBowlerId === newBowlerId) {
+    return res.status(400).json({ error: 'New bowler must be different from the current bowler' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const inningsRes = await client.query('SELECT * FROM innings WHERE id=$1 FOR UPDATE', [inningsId]);
+    const innings = inningsRes.rows[0];
+    if (!innings) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Innings not found' }); }
+
+    const ballsRes = await client.query(
+      'SELECT id FROM ball_events WHERE innings_id=$1 AND over_no=$2 AND bowler_id=$3',
+      [inningsId, overNo, oldBowlerId]
+    );
+    if (ballsRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'That bowler did not bowl that over' });
+    }
+
+    // Make sure the corrected bowler is on the bowling team's roster and has
+    // a bowling_records row to accumulate into (they may never have bowled
+    // elsewhere in this innings), same as correct-bowler above.
+    await client.query(
+      `INSERT INTO match_players (match_id, player_id, team) VALUES ($1, $2, $3)
+       ON CONFLICT (match_id, player_id, team) DO NOTHING`,
+      [innings.match_id, newBowlerId, innings.bowling_team]
+    );
+    await client.query(
+      `INSERT INTO bowling_records (innings_id, player_id) VALUES ($1, $2)
+       ON CONFLICT (innings_id, player_id) DO NOTHING`,
+      [inningsId, newBowlerId]
+    );
+
+    await client.query(
+      'UPDATE ball_events SET bowler_id=$1 WHERE innings_id=$2 AND over_no=$3 AND bowler_id=$4',
+      [newBowlerId, inningsId, overNo, oldBowlerId]
+    );
+
+    await replayInnings(client, inningsId);
+
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// Replace one batter's ball(s) within a single over. Scoped to the specific
+// old_batsman_id so a mid-over wicket (two different batsmen facing balls
+// in the same over) can be corrected one batsman at a time without touching
+// the other.
+router.post('/innings/:inningsId/overs/:overNo/correct-batsman', requireAdminToken, async (req, res) => {
+  const { inningsId, overNo } = req.params;
+  const oldBatsmanId = normalizeNullableInt(req.body.old_batsman_id);
+  const newBatsmanId = normalizeNullableInt(req.body.new_batsman_id);
+  if (!oldBatsmanId || !newBatsmanId) {
+    return res.status(400).json({ error: 'old_batsman_id and new_batsman_id are required' });
+  }
+  if (oldBatsmanId === newBatsmanId) {
+    return res.status(400).json({ error: 'New batter must be different from the current batter' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const inningsRes = await client.query('SELECT * FROM innings WHERE id=$1 FOR UPDATE', [inningsId]);
+    const innings = inningsRes.rows[0];
+    if (!innings) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Innings not found' }); }
+
+    const ballsRes = await client.query(
+      'SELECT id FROM ball_events WHERE innings_id=$1 AND over_no=$2 AND batsman_id=$3',
+      [inningsId, overNo, oldBatsmanId]
+    );
+    if (ballsRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'That batter did not face a ball in that over' });
+    }
+
+    // Make sure the corrected batter is on the batting team's roster and has
+    // a batting_records row to accumulate into (they may never have batted
+    // elsewhere in this innings), same as correct-batsman above.
+    await client.query(
+      `INSERT INTO match_players (match_id, player_id, team) VALUES ($1, $2, $3)
+       ON CONFLICT (match_id, player_id, team) DO NOTHING`,
+      [innings.match_id, newBatsmanId, innings.batting_team]
+    );
+    await client.query(
+      `INSERT INTO batting_records (innings_id, player_id, status) VALUES ($1, $2, 'yet_to_bat')
+       ON CONFLICT (innings_id, player_id) DO NOTHING`,
+      [inningsId, newBatsmanId]
+    );
+
+    await client.query(
+      'UPDATE ball_events SET batsman_id=$1 WHERE innings_id=$2 AND over_no=$3 AND batsman_id=$4',
+      [newBatsmanId, inningsId, overNo, oldBatsmanId]
+    );
+
+    await replayInnings(client, inningsId);
 
     await client.query('COMMIT');
     res.json({ success: true });

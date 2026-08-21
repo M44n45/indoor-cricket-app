@@ -1592,6 +1592,9 @@ function renderFixPlayersPanel(matchId) {
         </select></td>
         <td><button class="btn-small btn-small-primary" onclick="saveFixBowler(${matchId}, ${inn.innings.id}, ${b.player_id})">Save</button></td>
       </tr>`).join('');
+    const overOptions = (inn.overs_recap || [])
+      .map(o => `<option value="${o.over_no}">Over ${o.over_no + 1} — ${escapeHtmlAttr(o.bowler_name)} to ${escapeHtmlAttr(o.batsman_name)}</option>`)
+      .join('');
     return `
       <div style="margin-top:12px;">
         <div class="helper-text" style="font-weight:600;">${teamLabel} — Innings ${inn.innings.innings_no}</div>
@@ -1600,6 +1603,17 @@ function renderFixPlayersPanel(matchId) {
         </div>
         <div class="lb-table-scroll">
         <table class="mini-table" style="margin-top:6px;"><thead><tr><th>Bowler</th><th>W/R</th><th colspan="2">Replace with</th></tr></thead><tbody>${bowlingRows || '<tr><td colspan="4" class="helper-text">No bowlers recorded.</td></tr>'}</tbody></table>
+        </div>
+        <div style="margin-top:10px; border-top:1px solid var(--border, #e5e7eb); padding-top:8px;">
+          <div class="helper-text" style="font-weight:600;">Fix a specific over</div>
+          <div class="helper-text">Only that over's bowler/batter changes — every other over is left alone.</div>
+          ${overOptions ? `
+            <select id="fp-over-select-${inn.innings.id}" class="field" style="margin-top:6px;" onchange="loadOverFixUI(${matchId}, ${inn.innings.id}, this.value)">
+              <option value="">— select an over —</option>
+              ${overOptions}
+            </select>
+            <div id="fp-over-detail-${inn.innings.id}"></div>
+          ` : '<div class="helper-text">No overs bowled yet.</div>'}
         </div>
       </div>`;
   }).join('');
@@ -1613,6 +1627,97 @@ function renderFixPlayersPanel(matchId) {
     <div class="admin-match-actions" style="margin-top:10px;">
       <button class="btn btn-secondary" onclick="loadAdminConsole()">Done</button>
     </div>`;
+}
+
+// Loads one over's ball-by-ball detail and renders a bowler-correction row
+// plus one batter-correction row per distinct batter who faced that over
+// (usually one, but a mid-over wicket means there can be two).
+async function loadOverFixUI(matchId, inningsId, overNo) {
+  const detailEl = document.getElementById(`fp-over-detail-${inningsId}`);
+  if (!detailEl) return;
+  if (overNo === '' || overNo === null || overNo === undefined) { detailEl.innerHTML = ''; return; }
+  detailEl.innerHTML = '<div class="helper-text" style="margin-top:6px;">Loading over…</div>';
+  const { allPlayers } = state.fixPlayersData;
+  const res = await fetch(`${API}/innings/${inningsId}/over/${overNo}/balls`);
+  const balls = await res.json();
+  if (!balls.length) { detailEl.innerHTML = '<div class="helper-text" style="margin-top:6px;">No balls recorded for that over.</div>'; return; }
+  const nameOf = (id) => { const p = allPlayers.find(pl => pl.id === id); return p ? p.name : `#${id}`; };
+  const bowlerId = balls[0].bowler_id;
+  const batsmanIds = [...new Set(balls.map(b => b.batsman_id))];
+  state.fixOverData = state.fixOverData || {};
+  state.fixOverData[inningsId] = { matchId, overNo, allPlayers };
+
+  const bowlerRow = `
+    <tr>
+      <td>${escapeHtmlAttr(nameOf(bowlerId))} (bowler)</td>
+      <td><select id="fp-over-bowl-${inningsId}" class="field" style="padding:4px; font-size:12px;">
+        <option value="">— replace with —</option>
+        ${fixPlayersOptionsHtml(allPlayers, bowlerId)}
+      </select></td>
+      <td><button class="btn-small btn-small-primary" onclick="saveFixOverBowler(${matchId}, ${inningsId}, ${overNo}, ${bowlerId})">Save</button></td>
+    </tr>`;
+  const batsmanRows = batsmanIds.map(bid => `
+    <tr>
+      <td>${escapeHtmlAttr(nameOf(bid))} (batter)</td>
+      <td><select id="fp-over-bat-${inningsId}-${bid}" class="field" style="padding:4px; font-size:12px;">
+        <option value="">— replace with —</option>
+        ${fixPlayersOptionsHtml(allPlayers, bid)}
+      </select></td>
+      <td><button class="btn-small btn-small-primary" onclick="saveFixOverBatsman(${matchId}, ${inningsId}, ${overNo}, ${bid})">Save</button></td>
+    </tr>`).join('');
+
+  detailEl.innerHTML = `
+    <div id="fp-over-error-${inningsId}" style="color:#dc2626; font-size:12.5px; margin-top:6px; display:none;"></div>
+    <div class="lb-table-scroll">
+      <table class="mini-table" style="margin-top:6px;">
+        <thead><tr><th>Player in over</th><th colspan="2">Replace with</th></tr></thead>
+        <tbody>${bowlerRow}${batsmanRows}</tbody>
+      </table>
+    </div>`;
+}
+
+async function saveFixOverBowler(matchId, inningsId, overNo, oldBowlerId) {
+  const sel = document.getElementById(`fp-over-bowl-${inningsId}`);
+  const errEl = document.getElementById(`fp-over-error-${inningsId}`);
+  if (errEl) errEl.style.display = 'none';
+  const newBowlerId = sel && sel.value ? parseInt(sel.value, 10) : null;
+  if (!newBowlerId) {
+    if (errEl) { errEl.innerText = 'Pick a replacement player first.'; errEl.style.display = 'block'; }
+    return;
+  }
+  const res = await fetch(`${API}/matches/innings/${inningsId}/overs/${overNo}/correct-bowler`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-token': state.adminToken || '' },
+    body: JSON.stringify({ old_bowler_id: oldBowlerId, new_bowler_id: newBowlerId })
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (errEl) { errEl.innerText = data.error || 'Could not reassign that over\'s bowler.'; errEl.style.display = 'block'; }
+    return;
+  }
+  await startFixPlayers(matchId);
+}
+
+async function saveFixOverBatsman(matchId, inningsId, overNo, oldBatsmanId) {
+  const sel = document.getElementById(`fp-over-bat-${inningsId}-${oldBatsmanId}`);
+  const errEl = document.getElementById(`fp-over-error-${inningsId}`);
+  if (errEl) errEl.style.display = 'none';
+  const newBatsmanId = sel && sel.value ? parseInt(sel.value, 10) : null;
+  if (!newBatsmanId) {
+    if (errEl) { errEl.innerText = 'Pick a replacement player first.'; errEl.style.display = 'block'; }
+    return;
+  }
+  const res = await fetch(`${API}/matches/innings/${inningsId}/overs/${overNo}/correct-batsman`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-token': state.adminToken || '' },
+    body: JSON.stringify({ old_batsman_id: oldBatsmanId, new_batsman_id: newBatsmanId })
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (errEl) { errEl.innerText = data.error || 'Could not reassign that over\'s batter.'; errEl.style.display = 'block'; }
+    return;
+  }
+  await startFixPlayers(matchId);
 }
 
 async function saveFixBatsman(matchId, inningsId, oldPlayerId) {
@@ -1967,6 +2072,17 @@ function exportScorecardCSV() {
       lines.push('No data');
     }
     lines.push('');
+    lines.push('Ball-by-Ball');
+    lines.push(['Over', 'Bowler', 'Batter', 'Runs', 'Wkts', 'Balls'].map(csvEscape).join(','));
+    if (inn.overs_recap && inn.overs_recap.length) {
+      inn.overs_recap.forEach(over => {
+        const ballsStr = over.balls.map(b => b.display).join(' ');
+        lines.push([over.over_no + 1, over.bowler_name, over.batsman_name, over.runs, over.wickets, ballsStr].map(csvEscape).join(','));
+      });
+    } else {
+      lines.push('No data');
+    }
+    lines.push('');
   });
   const csv = lines.join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -2033,6 +2149,19 @@ function exportScorecardPDF() {
       head: [['Bowler', 'O', 'M', 'R', 'W', 'Wd', 'Nb', 'Econ']],
       body: bowlingBody,
       styles: { fontSize: 8 },
+      headStyles: { fillColor: [30, 144, 255] },
+      margin: { left: 14, right: 14 }
+    });
+
+    const oversRecapBody = (inn.overs_recap && inn.overs_recap.length) ? inn.overs_recap.map(over => {
+      const ballsStr = over.balls.map(b => b.display).join(' ');
+      return [over.over_no + 1, over.bowler_name, over.batsman_name, over.runs, over.wickets, ballsStr];
+    }) : [['No data', '', '', '', '', '']];
+    doc.autoTable({
+      startY: doc.lastAutoTable.finalY + 6,
+      head: [['Over', 'Bowler', 'Batter', 'R', 'W', 'Balls']],
+      body: oversRecapBody,
+      styles: { fontSize: 7 },
       headStyles: { fillColor: [30, 144, 255] },
       margin: { left: 14, right: 14 }
     });

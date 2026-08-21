@@ -379,6 +379,14 @@ function formatDismissal(f) {
 // dismissal_type, bowler_name, fielder_name — present on rows returned by
 // the /scorecard and /full-scorecard endpoints). Reuses formatDismissal()
 // for the actual "c X b Y" / "run out (X)" wording.
+// Comma-joined list of every batsman who faced a ball in an over (falls back
+// to the single batsman_name field for older cached data that predates the
+// batsmen_names array).
+function formatOverBatsmen(over) {
+  if (Array.isArray(over.batsmen_names) && over.batsmen_names.length) return over.batsmen_names.join(', ');
+  return over.batsman_name || '';
+}
+
 function formatHowOut(b) {
   if (b.status === 'out') return formatDismissal(b) || 'out';
   if (b.status === 'retired') return 'retired';
@@ -1177,7 +1185,7 @@ async function refreshWatchScorecard() {
       return `
         <div class="over-recap-row">
           <div class="over-recap-header">
-            <span>Over ${over.over_no + 1} — <b>${over.bowler_name}</b> to ${over.batsman_name}</span>
+            <span>Over ${over.over_no + 1} — <b>${over.bowler_name}</b> to ${formatOverBatsmen(over)}</span>
             <span class="over-recap-total">${over.runs} Runs, ${over.wickets} Wkt</span>
           </div>
           <div class="over-recap-balls">${pills}</div>
@@ -1217,7 +1225,7 @@ function renderFirstInningsRecap(fi) {
     return `
       <div class="over-recap-row">
         <div class="over-recap-header">
-          <span>Over ${over.over_no + 1} — <b>${over.bowler_name}</b> to ${over.batsman_name}</span>
+          <span>Over ${over.over_no + 1} — <b>${over.bowler_name}</b> to ${formatOverBatsmen(over)}</span>
           <span class="over-recap-total">${over.runs} Runs, ${over.wickets} Wkt</span>
         </div>
         <div class="over-recap-balls">${pills}</div>
@@ -1969,7 +1977,7 @@ async function loadFullScorecard() {
       return `
         <div class="over-recap-row">
           <div class="over-recap-header">
-            <span>Over ${over.over_no + 1} — <b>${over.bowler_name}</b> to ${over.batsman_name}</span>
+            <span>Over ${over.over_no + 1} — <b>${over.bowler_name}</b> to ${formatOverBatsmen(over)}</span>
             <span class="over-recap-total">${over.runs} Runs, ${over.wickets} Wkt</span>
           </div>
           <div class="over-recap-balls">${pills}</div>
@@ -2061,7 +2069,7 @@ function exportScorecardCSV() {
     if (inn.overs_recap && inn.overs_recap.length) {
       inn.overs_recap.forEach(over => {
         const ballsStr = over.balls.map(b => b.display).join(' ');
-        lines.push([over.over_no + 1, over.bowler_name, over.batsman_name, over.runs, over.wickets, ballsStr].map(csvEscape).join(','));
+        lines.push([over.over_no + 1, over.bowler_name, formatOverBatsmen(over), over.runs, over.wickets, ballsStr].map(csvEscape).join(','));
       });
     } else {
       lines.push('No data');
@@ -2164,7 +2172,7 @@ function exportScorecardPDF() {
 
     const oversRecapBody = (inn.overs_recap && inn.overs_recap.length) ? inn.overs_recap.map(over => {
       const ballsStr = over.balls.map(b => b.display).join(' ');
-      return [over.over_no + 1, over.bowler_name, over.batsman_name, over.runs, over.wickets, ballsStr];
+      return [over.over_no + 1, over.bowler_name, formatOverBatsmen(over), over.runs, over.wickets, ballsStr];
     }) : [['No data', '', '', '', '', '']];
     doc.autoTable({
       startY: doc.lastAutoTable.finalY + 6,
@@ -3550,7 +3558,7 @@ function renderScoreOversRecap(oversRecap) {
     return `
       <div class="over-recap-row">
         <div class="over-recap-header">
-          <span>Over ${over.over_no + 1} — <b>${over.bowler_name}</b> to ${over.batsman_name}</span>
+          <span>Over ${over.over_no + 1} — <b>${over.bowler_name}</b> to ${formatOverBatsmen(over)}</span>
           <span class="over-recap-total">${over.runs} Runs, ${over.wickets} Wkt</span>
         </div>
         <div class="over-recap-balls">${pills}</div>

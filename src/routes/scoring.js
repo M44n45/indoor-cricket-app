@@ -20,13 +20,18 @@ async function computeOversRecap(inningsId) {
   const oversMap = {};
   for (const e of events.rows) {
     if (!oversMap[e.over_no]) {
-      oversMap[e.over_no] = { over_no: e.over_no, bowler_name: e.bowler_name, balls: [], runs: 0, wickets: 0 };
+      oversMap[e.over_no] = { over_no: e.over_no, bowler_name: e.bowler_name, balls: [], runs: 0, wickets: 0, batsmen_names: [] };
     }
     const o = oversMap[e.over_no];
     const totalBallRuns = e.runs + (e.extra_runs || 0);
     o.runs += totalBallRuns;
     if (e.is_wicket) o.wickets += 1;
     o.batsman_name = e.batsman_name;
+    // Track every distinct batsman who faced a ball in this over, in the
+    // order they came to the crease (e.g. a wicket mid-over brings in a new
+    // batsman), so the recap can show "Amit to Varun, Robin" instead of
+    // just the last man standing.
+    if (!o.batsmen_names.includes(e.batsman_name)) o.batsmen_names.push(e.batsman_name);
     o.balls.push({
       runs: e.runs,
       extra_type: e.extra_type,

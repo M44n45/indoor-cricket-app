@@ -383,7 +383,27 @@ function formatHowOut(b) {
   if (b.status === 'out') return formatDismissal(b) || 'out';
   if (b.status === 'retired') return 'retired';
   if (b.status === 'batting') return 'not out';
-  return '-';
+  return '';
+}
+
+// Renders a standard-format batting table body: batter name with the
+// dismissal on a second line underneath (e.g. "c Fielder b Bowler"), plus
+// trailing Extras and Total summary rows. `extras` is the {byes, leg_byes,
+// wides, no_balls} object from the scorecard/full-scorecard endpoints;
+// `totalLabel` is the pre-formatted "187/6 (20.0 ov, RR 9.35)" string.
+function renderStandardBattingRows(batting, extras, totalLabel) {
+  const rows = batting.map(b => {
+    const sr = b.balls_faced > 0 ? ((b.runs / b.balls_faced) * 100).toFixed(1) : '0.0';
+    const howOut = formatHowOut(b);
+    const nameLabel = `${b.name}${b.is_captain ? ' (C)' : ''}`;
+    return `<tr><td>${nameLabel}${howOut ? `<span class="dismissal-sub">${howOut}</span>` : ''}</td><td>${b.runs}</td><td>${b.balls_faced}</td><td>${b.fours}</td><td>${b.sixes}</td><td>${sr}</td></tr>`;
+  }).join('');
+  const extrasText = extras
+    ? `${extras.total} (b ${extras.byes}, lb ${extras.leg_byes}, w ${extras.wides}, nb ${extras.no_balls})`
+    : '0';
+  const extrasRow = `<tr class="batting-extras-row"><td>Extras</td><td colspan="5">${extrasText}</td></tr>`;
+  const totalRow = totalLabel ? `<tr class="batting-total-row"><td>Total</td><td colspan="5">${totalLabel}</td></tr>` : '';
+  return rows + extrasRow + totalRow;
 }
 
 
@@ -1136,7 +1156,10 @@ async function refreshWatchScorecard() {
 
   const latestOver = oversRecap.length > 0 ? oversRecap[oversRecap.length - 1] : null;
   if (thisOverEl) thisOverEl.innerHTML = (latestOver ? latestOver.balls : []).map(b => `<div class="ball-chip">${b.display}</div>`).join('') || '<p class="helper-text">No balls recorded yet.</p>';
-  if (battingBody) battingBody.innerHTML = batting.map(p => `<tr><td>${p.name}</td><td>${p.runs}</td><td>${p.balls_faced}</td><td>${p.fours}</td><td>${p.sixes}</td><td>${p.balls_faced > 0 ? ((p.runs / p.balls_faced) * 100).toFixed(1) : '0.0'}</td><td>${formatHowOut(p)}</td></tr>`).join('') || '<tr><td colspan="7">No batting data</td></tr>';
+  if (battingBody) {
+    const totalLabel = `${runs}/${wickets} (${oversCompleted.toFixed(1)} ov, RR: ${crr})`;
+    battingBody.innerHTML = batting.length ? renderStandardBattingRows(batting, data.extras, totalLabel) : '<tr><td colspan="6">No batting data</td></tr>';
+  }
   if (bowlingBody) bowlingBody.innerHTML = bowling.map(p => {
     const econ = calcEconomy(p.runs_conceded, p.overs_bowled);
     return `<tr><td>${p.name}</td><td>${p.overs_bowled}</td><td>${p.maidens || 0}</td><td>${p.runs_conceded}</td><td>${p.wickets}</td><td>${p.wides || 0}</td><td>${p.no_balls || 0}</td><td>${econ}</td></tr>`;
@@ -1173,7 +1196,11 @@ function renderFirstInningsRecap(fi) {
   const bowling = Array.isArray(fi.bowling) ? fi.bowling : [];
   const fow = Array.isArray(fi.fall_of_wickets) ? fi.fall_of_wickets : [];
   const oversRecap = Array.isArray(fi.overs_recap) ? fi.overs_recap : [];
-  if (battingBody) battingBody.innerHTML = batting.map(p => `<tr><td>${p.name}${p.status==='retired' ? ' (ret)' : p.status==='out' ? ' (out)' : ''}</td><td>${p.runs}</td><td>${p.balls_faced}</td><td>${p.fours}</td><td>${p.sixes}</td><td>${p.balls_faced > 0 ? ((p.runs / p.balls_faced) * 100).toFixed(1) : '0.0'}</td><td>${formatHowOut(p)}</td></tr>`).join('') || '<tr><td colspan="7">No batting data</td></tr>';
+  if (battingBody) {
+    const fiCrr = trueOvers(fi.overs_completed) > 0 ? (Number(fi.total_runs || 0) / trueOvers(fi.overs_completed)).toFixed(2) : '0.00';
+    const totalLabel = `${fi.total_runs ?? 0}/${fi.total_wickets ?? 0} (${Number(fi.overs_completed ?? 0).toFixed(1)} ov, RR: ${fiCrr})`;
+    battingBody.innerHTML = batting.length ? renderStandardBattingRows(batting, fi.extras, totalLabel) : '<tr><td colspan="6">No batting data</td></tr>';
+  }
   if (bowlingBody) bowlingBody.innerHTML = bowling.map(p => {
     const econ = calcEconomy(p.runs_conceded, p.overs_bowled);
     return `<tr><td>${p.name}</td><td>${p.overs_bowled}</td><td>${p.maidens || 0}</td><td>${p.runs_conceded}</td><td>${p.wickets}</td><td>${p.wides || 0}</td><td>${p.no_balls || 0}</td><td>${econ}</td></tr>`;
@@ -1922,11 +1949,9 @@ async function loadFullScorecard() {
   const container = document.getElementById('scorecard-innings-container');
   container.innerHTML = inningsList.map(inn => {
     const teamLabel = inn.innings.batting_team === 'A' ? 'Team A' : 'Team B';
-    const battingRows = inn.batting.map(b => {
-      const sr = b.balls_faced > 0 ? ((b.runs / b.balls_faced) * 100).toFixed(1) : '0.0';
-      const nameLabel = `${b.name}${b.is_captain ? ' (C)' : ''}${b.status==='retired' ? ' (ret)' : b.status==='out' ? ' (out)' : ''}`;
-      return `<tr><td>${nameLabel}</td><td>${b.runs}</td><td>${b.balls_faced}</td><td>${b.fours}</td><td>${b.sixes}</td><td>${sr}</td><td>${formatHowOut(b)}</td></tr>`;
-    }).join('');
+    const inningsCrr = trueOvers(inn.innings.overs_completed) > 0 ? (Number(inn.innings.total_runs || 0) / trueOvers(inn.innings.overs_completed)).toFixed(2) : '0.00';
+    const inningsTotalLabel = `${inn.innings.total_runs}/${inn.innings.total_wickets} (${parseFloat(inn.innings.overs_completed).toFixed(1)} ov, RR: ${inningsCrr})`;
+    const battingRows = inn.batting.length ? renderStandardBattingRows(inn.batting, inn.extras, inningsTotalLabel) : '<tr><td colspan="6">No data</td></tr>';
     const bowlingRows = inn.bowling.map(b => {
       const econ = calcEconomy(b.runs_conceded, b.overs_bowled);
       const nameLabel = `${b.name}${b.is_captain ? ' (C)' : ''}`;
@@ -1949,7 +1974,7 @@ async function loadFullScorecard() {
     return `
       <div class="card">
         <h2>${teamLabel} — Innings ${inn.innings.innings_no} (${inn.innings.total_runs}/${inn.innings.total_wickets}, ${parseFloat(inn.innings.overs_completed).toFixed(1)} ov)</h2>
-        <table class="mini-table"><thead><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th><th>How Out</th></tr></thead><tbody>${battingRows}</tbody></table>
+        <table class="mini-table"><thead><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody>${battingRows}</tbody></table>
         <h3 style="margin-top:10px; font-size:13px; color:var(--sub);">Bowling</h3>
         <table class="mini-table"><thead><tr><th>Bowler</th><th>O</th><th>M</th><th>R</th><th>W</th><th>Wd</th><th>Nb</th><th>Econ</th></tr></thead><tbody>${bowlingRows}</tbody></table>
       </div>
@@ -1990,9 +2015,15 @@ function exportScorecardCSV() {
     if (inn.batting.length) {
       inn.batting.forEach(b => {
         const sr = b.balls_faced > 0 ? ((b.runs / b.balls_faced) * 100).toFixed(1) : '0.0';
-        const nameLabel = `${b.name}${b.is_captain ? ' (C)' : ''}${b.status === 'retired' ? ' (ret)' : b.status === 'out' ? ' (out)' : ''}`;
+        const nameLabel = `${b.name}${b.is_captain ? ' (C)' : ''}`;
         lines.push([nameLabel, b.runs, b.balls_faced, b.fours, b.sixes, sr, formatHowOut(b)].map(csvEscape).join(','));
       });
+      const ex = inn.extras;
+      const extrasText = ex ? `${ex.total} (b ${ex.byes}, lb ${ex.leg_byes}, w ${ex.wides}, nb ${ex.no_balls})` : '0';
+      lines.push(['Extras', '', '', '', '', '', extrasText].map(csvEscape).join(','));
+      const inningsCrr = trueOvers(inn.innings.overs_completed) > 0 ? (Number(inn.innings.total_runs || 0) / trueOvers(inn.innings.overs_completed)).toFixed(2) : '0.00';
+      const totalText = `${inn.innings.total_runs}/${inn.innings.total_wickets} (${parseFloat(inn.innings.overs_completed).toFixed(1)} ov, RR: ${inningsCrr})`;
+      lines.push(['Total', '', '', '', '', '', totalText].map(csvEscape).join(','));
     } else {
       lines.push('No data');
     }
@@ -2061,14 +2092,26 @@ function exportScorecardPDF() {
     doc.setTextColor(0);
     doc.text(`Innings ${inn.innings.innings_no} — ${teamLabel} (${inn.innings.total_runs}/${inn.innings.total_wickets}, ${parseFloat(inn.innings.overs_completed).toFixed(1)} ov)`, 14, y);
 
-    const battingBody = inn.batting.length ? inn.batting.map(b => {
-      const sr = b.balls_faced > 0 ? ((b.runs / b.balls_faced) * 100).toFixed(1) : '0.0';
-      const nameLabel = `${b.name}${b.is_captain ? ' (C)' : ''}${b.status === 'retired' ? ' (ret)' : b.status === 'out' ? ' (out)' : ''}`;
-      return [nameLabel, b.runs, b.balls_faced, b.fours, b.sixes, sr, formatHowOut(b)];
-    }) : [['No data', '', '', '', '', '', '']];
+    let battingBody;
+    if (inn.batting.length) {
+      battingBody = inn.batting.map(b => {
+        const sr = b.balls_faced > 0 ? ((b.runs / b.balls_faced) * 100).toFixed(1) : '0.0';
+        const nameLabel = `${b.name}${b.is_captain ? ' (C)' : ''}`;
+        const howOut = formatHowOut(b);
+        return [howOut ? `${nameLabel}\n${howOut}` : nameLabel, b.runs, b.balls_faced, b.fours, b.sixes, sr];
+      });
+      const ex = inn.extras;
+      const extrasText = ex ? `${ex.total} (b ${ex.byes}, lb ${ex.leg_byes}, w ${ex.wides}, nb ${ex.no_balls})` : '0';
+      battingBody.push([{ content: 'Extras', styles: { fontStyle: 'bold' } }, { content: extrasText, colSpan: 5 }]);
+      const inningsCrr = trueOvers(inn.innings.overs_completed) > 0 ? (Number(inn.innings.total_runs || 0) / trueOvers(inn.innings.overs_completed)).toFixed(2) : '0.00';
+      const totalText = `${inn.innings.total_runs}/${inn.innings.total_wickets} (${parseFloat(inn.innings.overs_completed).toFixed(1)} ov, RR: ${inningsCrr})`;
+      battingBody.push([{ content: 'Total', styles: { fontStyle: 'bold' } }, { content: totalText, colSpan: 5, styles: { fontStyle: 'bold' } }]);
+    } else {
+      battingBody = [['No data', '', '', '', '', '']];
+    }
     doc.autoTable({
       startY: y + 3,
-      head: [['Batter', 'R', 'B', '4s', '6s', 'SR', 'How Out']],
+      head: [['Batter', 'R', 'B', '4s', '6s', 'SR']],
       body: battingBody,
       styles: { fontSize: 8 },
       headStyles: { fillColor: [30, 144, 255] },

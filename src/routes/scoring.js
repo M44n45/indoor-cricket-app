@@ -73,6 +73,28 @@ async function computeBowlerExtras(inningsId) {
   return map;
 }
 
+// Extras breakdown (byes, leg byes, wides, no-balls) for an innings, computed
+// directly from ball_events so it's always in sync with undo/replay. Wides
+// and no-balls here count only the extra run(s) awarded for the illegal
+// delivery itself (extra_runs), matching how they're stored on ball_events.
+async function computeExtrasBreakdown(inningsId) {
+  const res = await pool.query(
+    `SELECT
+       COALESCE(SUM(extra_runs) FILTER (WHERE extra_type = 'bye'), 0) AS byes,
+       COALESCE(SUM(extra_runs) FILTER (WHERE extra_type = 'leg_bye'), 0) AS leg_byes,
+       COALESCE(SUM(extra_runs) FILTER (WHERE extra_type = 'wide'), 0) AS wides,
+       COALESCE(SUM(extra_runs) FILTER (WHERE extra_type = 'no_ball'), 0) AS no_balls
+     FROM ball_events WHERE innings_id=$1`,
+    [inningsId]
+  );
+  const row = res.rows[0] || {};
+  const byes = parseInt(row.byes) || 0;
+  const leg_byes = parseInt(row.leg_byes) || 0;
+  const wides = parseInt(row.wides) || 0;
+  const no_balls = parseInt(row.no_balls) || 0;
+  return { byes, leg_byes, wides, no_balls, total: byes + leg_byes + wides + no_balls };
+}
+
 function oversToBalls(overs) {
   // Decimal overs where .5 = half an over = 3 balls (e.g. 3.5 -> 21 balls)
   return Math.round(parseFloat(overs) * 6);
@@ -294,6 +316,7 @@ router.get('/innings/:inningsId/scorecard', async (req, res) => {
     [inningsId]
   );
   const overs_recap = await computeOversRecap(inningsId);
+  const extras = await computeExtrasBreakdown(inningsId);
 
   let firstInnings = null;
   if (battingInnings && battingInnings.innings_no === 2) {
@@ -341,6 +364,7 @@ router.get('/innings/:inningsId/scorecard', async (req, res) => {
         [fi.id]
       );
       const fiOversRecap = await computeOversRecap(fi.id);
+      const fiExtras = await computeExtrasBreakdown(fi.id);
       firstInnings = {
         total_runs: fi.total_runs,
         total_wickets: fi.total_wickets,
@@ -351,12 +375,13 @@ router.get('/innings/:inningsId/scorecard', async (req, res) => {
         batting: fiBatting.rows,
         bowling: fiBowlingWithExtras,
         fall_of_wickets: fiFow.rows,
-        overs_recap: fiOversRecap
+        overs_recap: fiOversRecap,
+        extras: fiExtras
       };
     }
   }
 
-  res.json({ innings: battingInnings, batting: batting.rows, bowling: bowlingWithExtras, fall_of_wickets: fow.rows, overs_recap, first_innings: firstInnings });
+  res.json({ innings: battingInnings, batting: batting.rows, bowling: bowlingWithExtras, fall_of_wickets: fow.rows, overs_recap, extras, first_innings: firstInnings });
 });
 
 // Ball-by-ball events for a specific over
@@ -584,8 +609,9 @@ router.get('/matches/:matchId/full-scorecard', async (req, res) => {
 
     // Per-ball recap grouped by over, for the ball-by-ball strip in the scorecard
     const overs_recap = await computeOversRecap(inn.id);
+    const extras = await computeExtrasBreakdown(inn.id);
 
-    result.push({ innings: inn, batting: batting.rows, bowling: bowlingWithExtras, overs_recap });
+    result.push({ innings: inn, batting: batting.rows, bowling: bowlingWithExtras, overs_recap, extras });
   }
   res.json(result);
 });

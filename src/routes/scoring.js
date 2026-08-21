@@ -610,8 +610,19 @@ router.get('/matches/:matchId/full-scorecard', async (req, res) => {
     // Per-ball recap grouped by over, for the ball-by-ball strip in the scorecard
     const overs_recap = await computeOversRecap(inn.id);
     const extras = await computeExtrasBreakdown(inn.id);
+    const fow = await pool.query(
+      `SELECT fow.*, p.name,
+         br.dismissal_type, bowler.name AS bowler_name, fielder.name AS fielder_name
+       FROM fall_of_wickets fow
+       JOIN players p ON p.id = fow.player_id
+       LEFT JOIN batting_records br ON br.innings_id = fow.innings_id AND br.player_id = fow.player_id
+       LEFT JOIN players bowler ON bowler.id = br.bowler_id
+       LEFT JOIN players fielder ON fielder.id = br.fielder_id
+       WHERE fow.innings_id=$1 ORDER BY fow.wicket_no`,
+      [inn.id]
+    );
 
-    result.push({ innings: inn, batting: batting.rows, bowling: bowlingWithExtras, overs_recap, extras });
+    result.push({ innings: inn, batting: batting.rows, bowling: bowlingWithExtras, overs_recap, extras, fall_of_wickets: fow.rows });
   }
   res.json(result);
 });

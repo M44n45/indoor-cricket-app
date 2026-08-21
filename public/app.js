@@ -1952,6 +1952,10 @@ async function loadFullScorecard() {
     const inningsCrr = trueOvers(inn.innings.overs_completed) > 0 ? (Number(inn.innings.total_runs || 0) / trueOvers(inn.innings.overs_completed)).toFixed(2) : '0.00';
     const inningsTotalLabel = `${inn.innings.total_runs}/${inn.innings.total_wickets} (${parseFloat(inn.innings.overs_completed).toFixed(1)} ov, RR: ${inningsCrr})`;
     const battingRows = inn.batting.length ? renderStandardBattingRows(inn.batting, inn.extras, inningsTotalLabel) : '<tr><td colspan="6">No data</td></tr>';
+    const fowRows = (inn.fall_of_wickets || []).map(f => {
+      const over = f.over_at_fall != null ? Number(f.over_at_fall).toFixed(1) : '0.0';
+      return `<tr><td class="clickable-name" onclick="showPlayerCard(${f.player_id})">${f.name || 'unknown'}</td><td>${f.wicket_no ?? ''}-${f.team_score_at_fall ?? ''}</td><td>${over}</td></tr>`;
+    }).join('');
     const bowlingRows = inn.bowling.map(b => {
       const econ = calcEconomy(b.runs_conceded, b.overs_bowled);
       const nameLabel = `${b.name}${b.is_captain ? ' (C)' : ''}`;
@@ -1977,6 +1981,8 @@ async function loadFullScorecard() {
         <table class="mini-table"><thead><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody>${battingRows}</tbody></table>
         <h3 style="margin-top:10px; font-size:13px; color:var(--sub);">Bowling</h3>
         <table class="mini-table"><thead><tr><th>Bowler</th><th>O</th><th>M</th><th>R</th><th>W</th><th>Wd</th><th>Nb</th><th>Econ</th></tr></thead><tbody>${bowlingRows}</tbody></table>
+        <h3 style="margin-top:10px; font-size:13px; color:var(--sub);">Fall of Wickets</h3>
+        <table class="mini-table"><thead><tr><th>Fall of Wickets</th><th>Score</th><th>Over</th></tr></thead><tbody>${fowRows || '<tr><td colspan="3">No wickets fell</td></tr>'}</tbody></table>
       </div>
       <div class="card">
         <h3 style="margin-top:0; font-size:13px; color:var(--sub);">Ball-by-Ball Recap</h3>
@@ -2037,6 +2043,17 @@ function exportScorecardCSV() {
       });
     } else {
       lines.push('No data');
+    }
+    lines.push('');
+    lines.push('Fall of Wickets');
+    lines.push(['Batter', 'Score', 'Over'].map(csvEscape).join(','));
+    if (inn.fall_of_wickets && inn.fall_of_wickets.length) {
+      inn.fall_of_wickets.forEach(f => {
+        const over = f.over_at_fall != null ? Number(f.over_at_fall).toFixed(1) : '0.0';
+        lines.push([f.name || 'unknown', `${f.wicket_no ?? ''}-${f.team_score_at_fall ?? ''}`, over].map(csvEscape).join(','));
+      });
+    } else {
+      lines.push('No wickets fell');
     }
     lines.push('');
     lines.push('Ball-by-Ball');
@@ -2127,6 +2144,19 @@ function exportScorecardPDF() {
       startY: doc.lastAutoTable.finalY + 3,
       head: [['Bowler', 'O', 'M', 'R', 'W', 'Wd', 'Nb', 'Econ']],
       body: bowlingBody,
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [30, 144, 255] },
+      margin: { left: 14, right: 14 }
+    });
+
+    const fowBody = (inn.fall_of_wickets && inn.fall_of_wickets.length) ? inn.fall_of_wickets.map(f => {
+      const over = f.over_at_fall != null ? Number(f.over_at_fall).toFixed(1) : '0.0';
+      return [f.name || 'unknown', `${f.wicket_no ?? ''}-${f.team_score_at_fall ?? ''}`, over];
+    }) : [['No wickets fell', '', '']];
+    doc.autoTable({
+      startY: doc.lastAutoTable.finalY + 3,
+      head: [['Fall of Wickets', 'Score', 'Over']],
+      body: fowBody,
       styles: { fontSize: 8 },
       headStyles: { fillColor: [30, 144, 255] },
       margin: { left: 14, right: 14 }

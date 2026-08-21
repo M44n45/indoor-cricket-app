@@ -14,6 +14,8 @@
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
 :root{
   --bg:#0a1128; --bg-light:#f4f6fb; --card:#ffffff; --primary:#1e56c9; --primary-dark:#0b2f73;
@@ -768,6 +770,10 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
     <button id="lb-tab-batting-btn" class="lb-tab-btn active" onclick="switchLeaderboardTab('batting')">🏏 Batting</button>
     <button id="lb-tab-bowling-btn" class="lb-tab-btn" onclick="switchLeaderboardTab('bowling')">🎯 Bowling</button>
   </div>
+  <div class="lb-export-bar" style="display:flex; gap:8px; margin:0 0 10px;">
+    <button class="btn-small" style="flex:1;" onclick="exportLeaderboardCSV()">⬇️ Export CSV</button>
+    <button class="btn-small" style="flex:1;" onclick="exportLeaderboardPDF()">⬇️ Export PDF</button>
+  </div>
 
   <div class="card lb-card lb-card-live-batting" id="lb-tab-batting">
     <h2 class="lb-section-title">🔥 Batting Leaderboard</h2>
@@ -828,7 +834,7 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
 </nav>
 
 <script src="offline.js?v=1"></script>
-<script src="app.js?v=86"></script>
+<script src="app.js?v=87"></script>
   <button id="pwa-install-btn" class="pwa-install-btn" style="display:none;" onclick="triggerPwaInstall()">⬇️ Install App</button>
   <button id="floating-admin-gear" class="floating-admin-gear" onclick="enterAdminConsole()" aria-label="Admin Console">⚙️</button>
 </body>

@@ -1791,6 +1791,7 @@ async function loadFullScorecard() {
 
 
 let leaderboardMode = 'overall';
+let lastLeaderboardData = null; // { batting, bowling } from the most recent /stats/leaderboard fetch, used by CSV/PDF export
 
 function switchLeaderboardMode(mode) {
   leaderboardMode = mode;
@@ -1810,6 +1811,7 @@ async function loadLeaderboard() {
   const dateQuery = (leaderboardMode === 'day' && dateInput && dateInput.value) ? `?date=${dateInput.value}` : '';
   const res = await fetch(`${API}/stats/leaderboard${dateQuery}`);
   const data = await res.json();
+  lastLeaderboardData = data;
   const emptyMsg = leaderboardMode === 'day' ? 'No matches played on this day.' : 'No matches recorded yet.';
   const battingBody = document.querySelector('#lb-live-batting-table tbody');
   battingBody.innerHTML = data.batting.length ? data.batting.map(r => `
@@ -1832,6 +1834,123 @@ function switchLeaderboardTab(tab) {
   document.getElementById('lb-tab-bowling').style.display = tab === 'bowling' ? 'block' : 'none';
   document.getElementById('lb-tab-batting-btn').classList.toggle('active', tab === 'batting');
   document.getElementById('lb-tab-bowling-btn').classList.toggle('active', tab === 'bowling');
+}
+
+// --- Leaderboard export (CSV / PDF) ---------------------------------------
+// Both exports reuse whatever the leaderboard last fetched (lastLeaderboardData)
+// rather than re-querying, so the exported file always matches what's on screen
+// (same Overall/Day mode and date).
+
+const LB_BATTING_COLUMNS = [
+  { key: 'name', label: 'Player' }, { key: 'matches_played', label: 'M' },
+  { key: 'innings_played', label: 'Inn' }, { key: 'total_runs', label: 'R' },
+  { key: 'fours', label: '4s' }, { key: 'sixes', label: '6s' },
+  { key: 'avg', label: 'Avg' }, { key: 'strike_rate', label: 'SR' },
+  { key: 'wl', label: 'W-L' }, { key: 'win_pct', label: 'Win%' }
+];
+const LB_BOWLING_COLUMNS = [
+  { key: 'name', label: 'Player' }, { key: 'matches_played', label: 'M' },
+  { key: 'overs_bowled', label: 'Ov' }, { key: 'wickets', label: 'W' },
+  { key: 'runs_conceded', label: 'RC' }, { key: 'economy', label: 'Econ' }
+];
+
+function lbExportRows(data) {
+  const batting = (data.batting || []).map(r => ({
+    name: r.name, matches_played: r.matches_played, innings_played: r.innings_played,
+    total_runs: r.total_runs, fours: r.fours, sixes: r.sixes, avg: r.avg,
+    strike_rate: Math.round(r.strike_rate), wl: `${r.wins}-${r.losses}`, win_pct: `${r.win_pct}%`
+  }));
+  const bowling = (data.bowling || []).map(r => ({
+    name: r.name, matches_played: r.matches_played, overs_bowled: r.overs_bowled,
+    wickets: r.wickets, runs_conceded: r.runs_conceded, economy: r.economy
+  }));
+  return { batting, bowling };
+}
+
+function lbExportMeta() {
+  const dateInput = document.getElementById('lb-date-picker');
+  const dateVal = (leaderboardMode === 'day' && dateInput && dateInput.value) ? dateInput.value : null;
+  const label = dateVal ? `Day — ${dateVal}` : 'Overall';
+  const filenamePart = dateVal ? `day-${dateVal}` : 'overall';
+  return { label, filenamePart };
+}
+
+function csvEscape(val) {
+  const s = (val === null || val === undefined) ? '' : String(val);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function csvSection(title, columns, rows) {
+  const lines = [title, columns.map(c => csvEscape(c.label)).join(',')];
+  if (rows.length) {
+    rows.forEach(r => lines.push(columns.map(c => csvEscape(r[c.key])).join(',')));
+  } else {
+    lines.push('No data');
+  }
+  return lines.join('\n');
+}
+
+function exportLeaderboardCSV() {
+  if (!lastLeaderboardData) { alert('Leaderboard hasn\'t loaded yet — try again in a moment.'); return; }
+  const { batting, bowling } = lbExportRows(lastLeaderboardData);
+  const meta = lbExportMeta();
+  const csv = [
+    `Leaderboard (${meta.label})`,
+    '',
+    csvSection('Batting', LB_BATTING_COLUMNS, batting),
+    '',
+    csvSection('Bowling', LB_BOWLING_COLUMNS, bowling)
+  ].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `leaderboard-${meta.filenamePart}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportLeaderboardPDF() {
+  if (!lastLeaderboardData) { alert('Leaderboard hasn\'t loaded yet — try again in a moment.'); return; }
+  if (!window.jspdf || !window.jspdf.jsPDF) { alert('PDF export isn\'t available right now — check your internet connection and try again.'); return; }
+  const { batting, bowling } = lbExportRows(lastLeaderboardData);
+  const meta = lbExportMeta();
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+
+  doc.setFontSize(16);
+  doc.text('CageCricket Leaderboard', 14, 16);
+  doc.setFontSize(10);
+  doc.setTextColor(100);
+  doc.text(`${meta.label}  •  Generated ${new Date().toLocaleDateString()}`, 14, 22);
+
+  doc.setFontSize(12);
+  doc.setTextColor(0);
+  doc.text('Batting', 14, 32);
+  doc.autoTable({
+    startY: 35,
+    head: [LB_BATTING_COLUMNS.map(c => c.label)],
+    body: batting.length ? batting.map(r => LB_BATTING_COLUMNS.map(c => r[c.key])) : [['No data', '', '', '', '', '', '', '', '', '']],
+    styles: { fontSize: 8 },
+    headStyles: { fillColor: [30, 144, 255] },
+    margin: { left: 14, right: 14 }
+  });
+
+  const afterBatting = doc.lastAutoTable.finalY + 10;
+  doc.setFontSize(12);
+  doc.text('Bowling', 14, afterBatting);
+  doc.autoTable({
+    startY: afterBatting + 3,
+    head: [LB_BOWLING_COLUMNS.map(c => c.label)],
+    body: bowling.length ? bowling.map(r => LB_BOWLING_COLUMNS.map(c => r[c.key])) : [['No data', '', '', '', '', '']],
+    styles: { fontSize: 8 },
+    headStyles: { fillColor: [30, 144, 255] },
+    margin: { left: 14, right: 14 }
+  });
+
+  doc.save(`leaderboard-${meta.filenamePart}.pdf`);
 }
 
 

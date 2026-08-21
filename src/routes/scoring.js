@@ -556,10 +556,13 @@ router.get('/matches/:matchId/full-scorecard', async (req, res) => {
     // is_captain is looked up per-team (not just per-player) since a common
     // player can captain one side without being captain of the other.
     const batting = await pool.query(
-      `SELECT br.*, p.name, COALESCE(mp.is_captain, false) AS is_captain
+      `SELECT br.*, p.name, COALESCE(mp.is_captain, false) AS is_captain,
+        bowler.name AS bowler_name, fielder.name AS fielder_name
        FROM batting_records br
        JOIN players p ON p.id = br.player_id
        LEFT JOIN match_players mp ON mp.match_id=$2 AND mp.player_id=br.player_id AND mp.team=$3
+       LEFT JOIN players bowler ON bowler.id = br.bowler_id
+       LEFT JOIN players fielder ON fielder.id = br.fielder_id
        WHERE br.innings_id=$1 ORDER BY br.batting_order NULLS LAST`,
       [inn.id, matchId, inn.batting_team]
     );

@@ -1428,7 +1428,7 @@ async function loadAdminConsole() {
         ${m.status === 'in_progress' ? `<button class="btn btn-primary" onclick="markMatchCompleted(${m.id})">Mark Completed</button>` : ''}
         ${canResume ? `<button class="btn btn-secondary" onclick="continueScoring(${m.id})">${resumeLabel}</button>` : ''}
         <button class="btn btn-secondary" onclick="startEditTeamNames(${m.id})">Edit Names</button>
-        ${m.status === 'completed' ? `<button class="btn btn-secondary" onclick="startFixPlayers(${m.id})">Fix Players</button>` : ''}
+        ${m.status === 'completed' ? `<button class="btn btn-secondary" onclick="startFixPlayers(${m.id})">Fix Over</button>` : ''}
         <button class="btn btn-secondary admin-btn-danger" onclick="deleteMatch(${m.id})">Delete</button>
       </div>
     </div>`;
@@ -1533,16 +1533,16 @@ async function saveEditTeamNames(matchId) {
 
 
 
-// --- Fix Players (correct a completed match's batting/bowling records) ----
-// Lets an admin reassign a batting or bowling record — plus every ball,
-// dismissal, and fall-of-wicket tied to it — from whoever was mistakenly
-// selected while scoring to the correct player. Scoped to one innings at a
-// time since that's how the underlying records are keyed.
+// --- Fix Over (correct a completed match's per-over batting/bowling) ------
+// Lets an admin fix a scoring error for one specific over — replace the
+// bowler who bowled it, or the batter(s) who faced it — without touching
+// any other over. Scoped to one innings at a time since that's how the
+// underlying records are keyed.
 
 async function startFixPlayers(matchId) {
   const card = document.getElementById(`admin-match-card-${matchId}`);
   if (!card) return;
-  card.innerHTML = `<div class="admin-match-header"><div class="admin-match-title">Fix Players</div><div class="helper-text">Loading scorecard…</div></div>`;
+  card.innerHTML = `<div class="admin-match-header"><div class="admin-match-title">Fix Over</div><div class="helper-text">Loading scorecard…</div></div>`;
   const [scorecardRes, playersRes] = await Promise.all([
     fetch(`${API}/matches/${matchId}/full-scorecard`),
     fetch(`${API}/players`)
@@ -1564,63 +1564,33 @@ function fixPlayersOptionsHtml(allPlayers, excludeId) {
 function renderFixPlayersPanel(matchId) {
   const card = document.getElementById(`admin-match-card-${matchId}`);
   if (!card) return;
-  const { innings, allPlayers } = state.fixPlayersData;
+  const { innings } = state.fixPlayersData;
   if (!innings.length) {
-    card.innerHTML = `<div class="admin-match-header"><div class="admin-match-title">Fix Players</div><div class="helper-text">No innings recorded for this match.</div></div>
+    card.innerHTML = `<div class="admin-match-header"><div class="admin-match-title">Fix Over</div><div class="helper-text">No innings recorded for this match.</div></div>
       <div class="admin-match-actions"><button class="btn btn-secondary" onclick="loadAdminConsole()">Back</button></div>`;
     return;
   }
   const inningsHtml = innings.map(inn => {
     const teamLabel = inn.innings.batting_team === 'A' ? 'Team A' : 'Team B';
-    const battingRows = inn.batting.map(b => `
-      <tr>
-        <td>${escapeHtmlAttr(b.name)}${b.status === 'out' ? ' (out)' : ''}</td>
-        <td>${b.runs}</td>
-        <td><select id="fp-bat-${inn.innings.id}-${b.player_id}" class="field" style="padding:4px; font-size:12px;">
-          <option value="">— replace with —</option>
-          ${fixPlayersOptionsHtml(allPlayers, b.player_id)}
-        </select></td>
-        <td><button class="btn-small btn-small-primary" onclick="saveFixBatsman(${matchId}, ${inn.innings.id}, ${b.player_id})">Save</button></td>
-      </tr>`).join('');
-    const bowlingRows = inn.bowling.map(b => `
-      <tr>
-        <td>${escapeHtmlAttr(b.name)}</td>
-        <td>${b.wickets}/${b.runs_conceded}</td>
-        <td><select id="fp-bowl-${inn.innings.id}-${b.player_id}" class="field" style="padding:4px; font-size:12px;">
-          <option value="">— replace with —</option>
-          ${fixPlayersOptionsHtml(allPlayers, b.player_id)}
-        </select></td>
-        <td><button class="btn-small btn-small-primary" onclick="saveFixBowler(${matchId}, ${inn.innings.id}, ${b.player_id})">Save</button></td>
-      </tr>`).join('');
     const overOptions = (inn.overs_recap || [])
       .map(o => `<option value="${o.over_no}">Over ${o.over_no + 1} — ${escapeHtmlAttr(o.bowler_name)} to ${escapeHtmlAttr(o.batsman_name)}</option>`)
       .join('');
     return `
       <div style="margin-top:12px;">
         <div class="helper-text" style="font-weight:600;">${teamLabel} — Innings ${inn.innings.innings_no}</div>
-        <div class="lb-table-scroll">
-        <table class="mini-table"><thead><tr><th>Batter</th><th>R</th><th colspan="2">Replace with</th></tr></thead><tbody>${battingRows || '<tr><td colspan="4" class="helper-text">No batters recorded.</td></tr>'}</tbody></table>
-        </div>
-        <div class="lb-table-scroll">
-        <table class="mini-table" style="margin-top:6px;"><thead><tr><th>Bowler</th><th>W/R</th><th colspan="2">Replace with</th></tr></thead><tbody>${bowlingRows || '<tr><td colspan="4" class="helper-text">No bowlers recorded.</td></tr>'}</tbody></table>
-        </div>
-        <div style="margin-top:10px; border-top:1px solid var(--border, #e5e7eb); padding-top:8px;">
-          <div class="helper-text" style="font-weight:600;">Fix a specific over</div>
-          <div class="helper-text">Only that over's bowler/batter changes — every other over is left alone.</div>
-          ${overOptions ? `
-            <select id="fp-over-select-${inn.innings.id}" class="field" style="margin-top:6px;" onchange="loadOverFixUI(${matchId}, ${inn.innings.id}, this.value)">
-              <option value="">— select an over —</option>
-              ${overOptions}
-            </select>
-            <div id="fp-over-detail-${inn.innings.id}"></div>
-          ` : '<div class="helper-text">No overs bowled yet.</div>'}
-        </div>
+        ${overOptions ? `
+          <select id="fp-over-select-${inn.innings.id}" class="field" style="margin-top:6px;" onchange="loadOverFixUI(${matchId}, ${inn.innings.id}, this.value)">
+            <option value="">— select an over —</option>
+            ${overOptions}
+          </select>
+          <div id="fp-over-detail-${inn.innings.id}"></div>
+        ` : '<div class="helper-text">No overs bowled yet.</div>'}
       </div>`;
   }).join('');
   card.innerHTML = `
     <div class="admin-match-header">
-      <div class="admin-match-title">Fix Players</div>
-      <div class="helper-text">Pick a replacement and hit Save — their runs, balls, wickets, and dismissals for that innings move to the new player.</div>
+      <div class="admin-match-title">Fix Over</div>
+      <div class="helper-text">Pick an over, then replace its bowler or batter — only that over changes, everything else stays as recorded.</div>
     </div>
     <div id="fix-players-error-${matchId}" style="color:#dc2626; font-size:12.5px; margin-top:6px; display:none;"></div>
     ${inningsHtml}
@@ -1644,8 +1614,6 @@ async function loadOverFixUI(matchId, inningsId, overNo) {
   const nameOf = (id) => { const p = allPlayers.find(pl => pl.id === id); return p ? p.name : `#${id}`; };
   const bowlerId = balls[0].bowler_id;
   const batsmanIds = [...new Set(balls.map(b => b.batsman_id))];
-  state.fixOverData = state.fixOverData || {};
-  state.fixOverData[inningsId] = { matchId, overNo, allPlayers };
 
   const bowlerRow = `
     <tr>
@@ -1720,49 +1688,6 @@ async function saveFixOverBatsman(matchId, inningsId, overNo, oldBatsmanId) {
   await startFixPlayers(matchId);
 }
 
-async function saveFixBatsman(matchId, inningsId, oldPlayerId) {
-  const sel = document.getElementById(`fp-bat-${inningsId}-${oldPlayerId}`);
-  const errEl = document.getElementById(`fix-players-error-${matchId}`);
-  if (errEl) errEl.style.display = 'none';
-  const newPlayerId = sel && sel.value ? parseInt(sel.value, 10) : null;
-  if (!newPlayerId) {
-    if (errEl) { errEl.innerText = 'Pick a replacement player first.'; errEl.style.display = 'block'; }
-    return;
-  }
-  const res = await fetch(`${API}/matches/innings/${inningsId}/correct-batsman`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-admin-token': state.adminToken || '' },
-    body: JSON.stringify({ old_player_id: oldPlayerId, new_player_id: newPlayerId })
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    if (errEl) { errEl.innerText = data.error || 'Could not reassign that batter.'; errEl.style.display = 'block'; }
-    return;
-  }
-  await startFixPlayers(matchId);
-}
-
-async function saveFixBowler(matchId, inningsId, oldPlayerId) {
-  const sel = document.getElementById(`fp-bowl-${inningsId}-${oldPlayerId}`);
-  const errEl = document.getElementById(`fix-players-error-${matchId}`);
-  if (errEl) errEl.style.display = 'none';
-  const newPlayerId = sel && sel.value ? parseInt(sel.value, 10) : null;
-  if (!newPlayerId) {
-    if (errEl) { errEl.innerText = 'Pick a replacement player first.'; errEl.style.display = 'block'; }
-    return;
-  }
-  const res = await fetch(`${API}/matches/innings/${inningsId}/correct-bowler`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-admin-token': state.adminToken || '' },
-    body: JSON.stringify({ old_player_id: oldPlayerId, new_player_id: newPlayerId })
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    if (errEl) { errEl.innerText = data.error || 'Could not reassign that bowler.'; errEl.style.display = 'block'; }
-    return;
-  }
-  await startFixPlayers(matchId);
-}
 
 async function continueScoring(matchId) {
   state.matchId = matchId;

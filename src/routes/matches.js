@@ -131,148 +131,16 @@ router.post('/innings/:inningsId/change-bowler', async (req, res) => {
   res.json({ success: true });
 });
 
-// --- Post-hoc scoring corrections -----------------------------------------
-// Unlike change-batsman/change-bowler above (which just move the live
-// striker/bowler pointer during scoring), these rewrite who a set of
-// already-recorded stats belongs to — e.g. the wrong player was selected
-// while scoring and every run/ball/wicket in that innings needs to move to
-// the right person. Admin-gated, like other after-the-fact match edits
-// (team rename, delete), since it silently rewrites completed data.
-
-// Reassign every batting stat in one innings from old_player_id to
-// new_player_id: the batting_records row itself, the ball-by-ball batsman_id
-// on every ball they faced, and their fall-of-wickets entry if they got out.
-// Does NOT touch bowler_id/fielder_id on OTHER batsmen's dismissals — those
-// record old_player_id correctly performing a different role (bowling/
-// fielding), which this correction isn't about.
-router.post('/innings/:inningsId/correct-batsman', requireAdminToken, async (req, res) => {
-  const { inningsId } = req.params;
-  const oldPlayerId = normalizeNullableInt(req.body.old_player_id);
-  const newPlayerId = normalizeNullableInt(req.body.new_player_id);
-  if (!oldPlayerId || !newPlayerId) {
-    return res.status(400).json({ error: 'old_player_id and new_player_id are required' });
-  }
-  if (oldPlayerId === newPlayerId) {
-    return res.status(400).json({ error: 'New player must be different from the current player' });
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const inningsRes = await client.query('SELECT * FROM innings WHERE id=$1 FOR UPDATE', [inningsId]);
-    const innings = inningsRes.rows[0];
-    if (!innings) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Innings not found' }); }
-
-    const existingRes = await client.query(
-      'SELECT id FROM batting_records WHERE innings_id=$1 AND player_id=$2', [inningsId, oldPlayerId]
-    );
-    if (existingRes.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'That player has no batting record in this innings' });
-    }
-    const conflictRes = await client.query(
-      'SELECT id FROM batting_records WHERE innings_id=$1 AND player_id=$2', [inningsId, newPlayerId]
-    );
-    if (conflictRes.rows.length > 0) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'The new player already has a batting record in this innings — merge is not supported' });
-    }
-
-    // Make sure the corrected player is actually on the batting team's roster
-    // for this match, so leaderboard/history joins and future editing pick
-    // them up correctly.
-    await client.query(
-      `INSERT INTO match_players (match_id, player_id, team) VALUES ($1, $2, $3)
-       ON CONFLICT (match_id, player_id, team) DO NOTHING`,
-      [innings.match_id, newPlayerId, innings.batting_team]
-    );
-
-    await client.query('UPDATE batting_records SET player_id=$1 WHERE innings_id=$2 AND player_id=$3', [newPlayerId, inningsId, oldPlayerId]);
-    await client.query('UPDATE ball_events SET batsman_id=$1 WHERE innings_id=$2 AND batsman_id=$3', [newPlayerId, inningsId, oldPlayerId]);
-    await client.query('UPDATE fall_of_wickets SET player_id=$1 WHERE innings_id=$2 AND player_id=$3', [newPlayerId, inningsId, oldPlayerId]);
-    if (innings.striker_id === oldPlayerId) {
-      await client.query('UPDATE innings SET striker_id=$1 WHERE id=$2', [newPlayerId, inningsId]);
-    }
-
-    await client.query('COMMIT');
-    res.json({ success: true });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    res.status(500).json({ error: err.message });
-  } finally {
-    client.release();
-  }
-});
-
-// Reassign every bowling stat in one innings from old_player_id to
-// new_player_id: the bowling_records row, ball-by-ball bowler_id, and any
-// dismissal credit (batting_records.bowler_id) they earned as the bowler.
-router.post('/innings/:inningsId/correct-bowler', requireAdminToken, async (req, res) => {
-  const { inningsId } = req.params;
-  const oldPlayerId = normalizeNullableInt(req.body.old_player_id);
-  const newPlayerId = normalizeNullableInt(req.body.new_player_id);
-  if (!oldPlayerId || !newPlayerId) {
-    return res.status(400).json({ error: 'old_player_id and new_player_id are required' });
-  }
-  if (oldPlayerId === newPlayerId) {
-    return res.status(400).json({ error: 'New player must be different from the current player' });
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const inningsRes = await client.query('SELECT * FROM innings WHERE id=$1 FOR UPDATE', [inningsId]);
-    const innings = inningsRes.rows[0];
-    if (!innings) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Innings not found' }); }
-
-    const existingRes = await client.query(
-      'SELECT id FROM bowling_records WHERE innings_id=$1 AND player_id=$2', [inningsId, oldPlayerId]
-    );
-    if (existingRes.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'That player has no bowling record in this innings' });
-    }
-    const conflictRes = await client.query(
-      'SELECT id FROM bowling_records WHERE innings_id=$1 AND player_id=$2', [inningsId, newPlayerId]
-    );
-    if (conflictRes.rows.length > 0) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'The new player already has a bowling record in this innings — merge is not supported' });
-    }
-
-    await client.query(
-      `INSERT INTO match_players (match_id, player_id, team) VALUES ($1, $2, $3)
-       ON CONFLICT (match_id, player_id, team) DO NOTHING`,
-      [innings.match_id, newPlayerId, innings.bowling_team]
-    );
-
-    await client.query('UPDATE bowling_records SET player_id=$1 WHERE innings_id=$2 AND player_id=$3', [newPlayerId, inningsId, oldPlayerId]);
-    await client.query('UPDATE ball_events SET bowler_id=$1 WHERE innings_id=$2 AND bowler_id=$3', [newPlayerId, inningsId, oldPlayerId]);
-    await client.query('UPDATE batting_records SET bowler_id=$1 WHERE innings_id=$2 AND bowler_id=$3', [newPlayerId, inningsId, oldPlayerId]);
-    if (innings.bowler_id === oldPlayerId) {
-      await client.query('UPDATE innings SET bowler_id=$1 WHERE id=$2', [newPlayerId, inningsId]);
-    }
-
-    await client.query('COMMIT');
-    res.json({ success: true });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    res.status(500).json({ error: err.message });
-  } finally {
-    client.release();
-  }
-});
-
 // --- Per-over scoring corrections ------------------------------------------
-// Unlike correct-batsman/correct-bowler above (which move every stat for a
-// player across the WHOLE innings — e.g. the wrong person was selected the
-// entire time), these fix a single over: the bowler recorded for over 4 was
-// actually someone else, or the striker facing over 6 was actually someone
-// else, while every other over is left completely alone. Both old and new
-// player may already have their own (correct) records elsewhere in this
-// innings, so — unlike the whole-innings correction — we can't just rename
-// a whole record; instead we edit only the affected ball_events rows for
-// that over, then fully replay the innings from ball_events (the same
-// routine undo uses) so every derived total, dismissal, and fall-of-wicket
-// entry stays consistent. Admin-gated, like the other after-the-fact edits.
+// Lets an admin fix a scoring error for one specific over of a match: the
+// bowler recorded for over 4 was actually someone else, or the striker
+// facing over 6 was actually someone else, while every other over is left
+// completely alone. Both old and new player may already have their own
+// (correct) records elsewhere in this innings, so we can't just rename a
+// whole record; instead we edit only the affected ball_events rows for that
+// over, then fully replay the innings from ball_events (the same routine
+// undo uses) so every derived total, dismissal, and fall-of-wicket entry
+// stays consistent. Admin-gated, like other after-the-fact match edits.
 
 // Replace the bowler for one specific over. One bowler bowls a whole over,
 // so this moves every ball in that over from old_bowler_id to new_bowler_id.
@@ -304,7 +172,7 @@ router.post('/innings/:inningsId/overs/:overNo/correct-bowler', requireAdminToke
 
     // Make sure the corrected bowler is on the bowling team's roster and has
     // a bowling_records row to accumulate into (they may never have bowled
-    // elsewhere in this innings), same as correct-bowler above.
+    // elsewhere in this innings).
     await client.query(
       `INSERT INTO match_players (match_id, player_id, team) VALUES ($1, $2, $3)
        ON CONFLICT (match_id, player_id, team) DO NOTHING`,
@@ -365,7 +233,7 @@ router.post('/innings/:inningsId/overs/:overNo/correct-batsman', requireAdminTok
 
     // Make sure the corrected batter is on the batting team's roster and has
     // a batting_records row to accumulate into (they may never have batted
-    // elsewhere in this innings), same as correct-batsman above.
+    // elsewhere in this innings).
     await client.query(
       `INSERT INTO match_players (match_id, player_id, team) VALUES ($1, $2, $3)
        ON CONFLICT (match_id, player_id, team) DO NOTHING`,

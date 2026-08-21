@@ -808,6 +808,10 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
     <div class="card">
       <button class="btn-small" style="margin-bottom:8px;" onclick="backToScorecardPicker()">‹ All Matches</button>
       <select id="scorecard-match-select" class="field" onchange="loadFullScorecard()"></select>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button class="btn-small" style="flex:1;" onclick="exportScorecardCSV()">⬇️ Export CSV</button>
+        <button class="btn-small" style="flex:1;" onclick="exportScorecardPDF()">⬇️ Export PDF</button>
+      </div>
     </div>
     <div id="scorecard-teams-container"></div>
     <div id="scorecard-innings-container"></div>
@@ -834,7 +838,7 @@ nav.tabbar button.active{color:var(--primary-dark); font-weight:700;}
 </nav>
 
 <script src="offline.js?v=1"></script>
-<script src="app.js?v=87"></script>
+<script src="app.js?v=88"></script>
   <button id="pwa-install-btn" class="pwa-install-btn" style="display:none;" onclick="triggerPwaInstall()">⬇️ Install App</button>
   <button id="floating-admin-gear" class="floating-admin-gear" onclick="enterAdminConsole()" aria-label="Admin Console">⚙️</button>
 </body>

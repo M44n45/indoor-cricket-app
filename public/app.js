@@ -1428,6 +1428,7 @@ async function loadAdminConsole() {
         ${m.status === 'in_progress' ? `<button class="btn btn-primary" onclick="markMatchCompleted(${m.id})">Mark Completed</button>` : ''}
         ${canResume ? `<button class="btn btn-secondary" onclick="continueScoring(${m.id})">${resumeLabel}</button>` : ''}
         <button class="btn btn-secondary" onclick="startEditTeamNames(${m.id})">Edit Names</button>
+        ${m.status === 'completed' ? `<button class="btn btn-secondary" onclick="startFixPlayers(${m.id})">Fix Players</button>` : ''}
         <button class="btn btn-secondary admin-btn-danger" onclick="deleteMatch(${m.id})">Delete</button>
       </div>
     </div>`;
@@ -1531,6 +1532,132 @@ async function saveEditTeamNames(matchId) {
 }
 
 
+
+// --- Fix Players (correct a completed match's batting/bowling records) ----
+// Lets an admin reassign a batting or bowling record — plus every ball,
+// dismissal, and fall-of-wicket tied to it — from whoever was mistakenly
+// selected while scoring to the correct player. Scoped to one innings at a
+// time since that's how the underlying records are keyed.
+
+async function startFixPlayers(matchId) {
+  const card = document.getElementById(`admin-match-card-${matchId}`);
+  if (!card) return;
+  card.innerHTML = `<div class="admin-match-header"><div class="admin-match-title">Fix Players</div><div class="helper-text">Loading scorecard…</div></div>`;
+  const [scorecardRes, playersRes] = await Promise.all([
+    fetch(`${API}/matches/${matchId}/full-scorecard`),
+    fetch(`${API}/players`)
+  ]);
+  const inningsList = await scorecardRes.json();
+  const allPlayers = await playersRes.json();
+  state.fixPlayersData = { matchId, innings: inningsList, allPlayers };
+  renderFixPlayersPanel(matchId);
+}
+
+function fixPlayersOptionsHtml(allPlayers, excludeId) {
+  return allPlayers
+    .filter(p => p.id !== excludeId)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(p => `<option value="${p.id}">${escapeHtmlAttr(p.name)}</option>`)
+    .join('');
+}
+
+function renderFixPlayersPanel(matchId) {
+  const card = document.getElementById(`admin-match-card-${matchId}`);
+  if (!card) return;
+  const { innings, allPlayers } = state.fixPlayersData;
+  if (!innings.length) {
+    card.innerHTML = `<div class="admin-match-header"><div class="admin-match-title">Fix Players</div><div class="helper-text">No innings recorded for this match.</div></div>
+      <div class="admin-match-actions"><button class="btn btn-secondary" onclick="loadAdminConsole()">Back</button></div>`;
+    return;
+  }
+  const inningsHtml = innings.map(inn => {
+    const teamLabel = inn.innings.batting_team === 'A' ? 'Team A' : 'Team B';
+    const battingRows = inn.batting.map(b => `
+      <tr>
+        <td>${escapeHtmlAttr(b.name)}${b.status === 'out' ? ' (out)' : ''}</td>
+        <td>${b.runs}</td>
+        <td><select id="fp-bat-${inn.innings.id}-${b.player_id}" class="field" style="padding:4px; font-size:12px;">
+          <option value="">— replace with —</option>
+          ${fixPlayersOptionsHtml(allPlayers, b.player_id)}
+        </select></td>
+        <td><button class="btn-small btn-small-primary" onclick="saveFixBatsman(${matchId}, ${inn.innings.id}, ${b.player_id})">Save</button></td>
+      </tr>`).join('');
+    const bowlingRows = inn.bowling.map(b => `
+      <tr>
+        <td>${escapeHtmlAttr(b.name)}</td>
+        <td>${b.wickets}/${b.runs_conceded}</td>
+        <td><select id="fp-bowl-${inn.innings.id}-${b.player_id}" class="field" style="padding:4px; font-size:12px;">
+          <option value="">— replace with —</option>
+          ${fixPlayersOptionsHtml(allPlayers, b.player_id)}
+        </select></td>
+        <td><button class="btn-small btn-small-primary" onclick="saveFixBowler(${matchId}, ${inn.innings.id}, ${b.player_id})">Save</button></td>
+      </tr>`).join('');
+    return `
+      <div style="margin-top:12px;">
+        <div class="helper-text" style="font-weight:600;">${teamLabel} — Innings ${inn.innings.innings_no}</div>
+        <div class="lb-table-scroll">
+        <table class="mini-table"><thead><tr><th>Batter</th><th>R</th><th colspan="2">Replace with</th></tr></thead><tbody>${battingRows || '<tr><td colspan="4" class="helper-text">No batters recorded.</td></tr>'}</tbody></table>
+        </div>
+        <div class="lb-table-scroll">
+        <table class="mini-table" style="margin-top:6px;"><thead><tr><th>Bowler</th><th>W/R</th><th colspan="2">Replace with</th></tr></thead><tbody>${bowlingRows || '<tr><td colspan="4" class="helper-text">No bowlers recorded.</td></tr>'}</tbody></table>
+        </div>
+      </div>`;
+  }).join('');
+  card.innerHTML = `
+    <div class="admin-match-header">
+      <div class="admin-match-title">Fix Players</div>
+      <div class="helper-text">Pick a replacement and hit Save — their runs, balls, wickets, and dismissals for that innings move to the new player.</div>
+    </div>
+    <div id="fix-players-error-${matchId}" style="color:#dc2626; font-size:12.5px; margin-top:6px; display:none;"></div>
+    ${inningsHtml}
+    <div class="admin-match-actions" style="margin-top:10px;">
+      <button class="btn btn-secondary" onclick="loadAdminConsole()">Done</button>
+    </div>`;
+}
+
+async function saveFixBatsman(matchId, inningsId, oldPlayerId) {
+  const sel = document.getElementById(`fp-bat-${inningsId}-${oldPlayerId}`);
+  const errEl = document.getElementById(`fix-players-error-${matchId}`);
+  if (errEl) errEl.style.display = 'none';
+  const newPlayerId = sel && sel.value ? parseInt(sel.value, 10) : null;
+  if (!newPlayerId) {
+    if (errEl) { errEl.innerText = 'Pick a replacement player first.'; errEl.style.display = 'block'; }
+    return;
+  }
+  const res = await fetch(`${API}/matches/innings/${inningsId}/correct-batsman`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-token': state.adminToken || '' },
+    body: JSON.stringify({ old_player_id: oldPlayerId, new_player_id: newPlayerId })
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (errEl) { errEl.innerText = data.error || 'Could not reassign that batter.'; errEl.style.display = 'block'; }
+    return;
+  }
+  await startFixPlayers(matchId);
+}
+
+async function saveFixBowler(matchId, inningsId, oldPlayerId) {
+  const sel = document.getElementById(`fp-bowl-${inningsId}-${oldPlayerId}`);
+  const errEl = document.getElementById(`fix-players-error-${matchId}`);
+  if (errEl) errEl.style.display = 'none';
+  const newPlayerId = sel && sel.value ? parseInt(sel.value, 10) : null;
+  if (!newPlayerId) {
+    if (errEl) { errEl.innerText = 'Pick a replacement player first.'; errEl.style.display = 'block'; }
+    return;
+  }
+  const res = await fetch(`${API}/matches/innings/${inningsId}/correct-bowler`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-token': state.adminToken || '' },
+    body: JSON.stringify({ old_player_id: oldPlayerId, new_player_id: newPlayerId })
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (errEl) { errEl.innerText = data.error || 'Could not reassign that bowler.'; errEl.style.display = 'block'; }
+    return;
+  }
+  await startFixPlayers(matchId);
+}
 
 async function continueScoring(matchId) {
   state.matchId = matchId;
@@ -1741,6 +1868,8 @@ async function loadMatchListForScorecard(preferredMatchId) {
   loadFullScorecard();
 }
 
+let lastScorecardData = null; // { matchId, matchMeta, innings } from the most recent full-scorecard fetch, used by CSV/PDF export
+
 async function loadFullScorecard() {
   const matchId = document.getElementById('scorecard-match-select').value;
   if (!matchId) return;
@@ -1748,6 +1877,7 @@ async function loadFullScorecard() {
   loadTeamsForMatch(matchId, 'scorecard-teams-container', matchMeta && matchMeta.team_a_name, matchMeta && matchMeta.team_b_name);
   const res = await fetch(`${API}/matches/${matchId}/full-scorecard`);
   const inningsList = await res.json();
+  lastScorecardData = { matchId, matchMeta, innings: inningsList };
   const container = document.getElementById('scorecard-innings-container');
   container.innerHTML = inningsList.map(inn => {
     const teamLabel = inn.innings.batting_team === 'A' ? 'Team A' : 'Team B';
@@ -1787,6 +1917,130 @@ async function loadFullScorecard() {
         <div class="over-recap-container">${oversRecapHtml}</div>
       </div>`;
   }).join('');
+}
+
+
+// --- Per-match scorecard export (CSV / PDF) --------------------------------
+// Reuses whatever loadFullScorecard() last fetched, so the export always
+// matches the match currently open in the picker.
+
+function scorecardMatchTitle(matchMeta) {
+  if (!matchMeta) return 'Match';
+  return matchMeta.match_name || `${matchMeta.team_a_name} vs ${matchMeta.team_b_name}`;
+}
+
+function scorecardFilenamePart(matchMeta, matchId) {
+  const title = scorecardMatchTitle(matchMeta);
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  return slug ? `${slug}-${matchId}` : `match-${matchId}`;
+}
+
+function exportScorecardCSV() {
+  if (!lastScorecardData || !lastScorecardData.innings || !lastScorecardData.innings.length) {
+    alert('Open a match\'s scorecard first — there\'s nothing to export yet.');
+    return;
+  }
+  const { matchId, matchMeta, innings } = lastScorecardData;
+  const lines = [scorecardMatchTitle(matchMeta), ''];
+  innings.forEach(inn => {
+    const teamLabel = inn.innings.batting_team === 'A' ? (matchMeta?.team_a_name || 'Team A') : (matchMeta?.team_b_name || 'Team B');
+    lines.push(`Innings ${inn.innings.innings_no} — ${teamLabel} (${inn.innings.total_runs}/${inn.innings.total_wickets}, ${parseFloat(inn.innings.overs_completed).toFixed(1)} ov)`);
+    lines.push(['Batter', 'R', 'B', '4s', '6s', 'SR'].map(csvEscape).join(','));
+    if (inn.batting.length) {
+      inn.batting.forEach(b => {
+        const sr = b.balls_faced > 0 ? ((b.runs / b.balls_faced) * 100).toFixed(1) : '0.0';
+        const nameLabel = `${b.name}${b.is_captain ? ' (C)' : ''}${b.status === 'retired' ? ' (ret)' : b.status === 'out' ? ' (out)' : ''}`;
+        lines.push([nameLabel, b.runs, b.balls_faced, b.fours, b.sixes, sr].map(csvEscape).join(','));
+      });
+    } else {
+      lines.push('No data');
+    }
+    lines.push('');
+    lines.push(['Bowler', 'O', 'M', 'R', 'W', 'Wd', 'Nb', 'Econ'].map(csvEscape).join(','));
+    if (inn.bowling.length) {
+      inn.bowling.forEach(b => {
+        const econ = calcEconomy(b.runs_conceded, b.overs_bowled);
+        const nameLabel = `${b.name}${b.is_captain ? ' (C)' : ''}`;
+        lines.push([nameLabel, b.overs_bowled, b.maidens || 0, b.runs_conceded, b.wickets, b.wides || 0, b.no_balls || 0, econ].map(csvEscape).join(','));
+      });
+    } else {
+      lines.push('No data');
+    }
+    lines.push('');
+  });
+  const csv = lines.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `scorecard-${scorecardFilenamePart(matchMeta, matchId)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportScorecardPDF() {
+  if (!lastScorecardData || !lastScorecardData.innings || !lastScorecardData.innings.length) {
+    alert('Open a match\'s scorecard first — there\'s nothing to export yet.');
+    return;
+  }
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    alert('PDF export isn\'t available right now — check your internet connection and try again.');
+    return;
+  }
+  const { matchId, matchMeta, innings } = lastScorecardData;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const title = scorecardMatchTitle(matchMeta);
+
+  doc.setFontSize(16);
+  doc.text(title, 14, 16);
+  doc.setFontSize(10);
+  doc.setTextColor(100);
+  const dateBit = matchMeta && matchMeta.match_date ? formatDateOnly(matchMeta.match_date) : '';
+  doc.text([dateBit, `Generated ${new Date().toLocaleDateString()}`].filter(Boolean).join('  •  '), 14, 22);
+
+  let y = 30;
+  innings.forEach(inn => {
+    const teamLabel = inn.innings.batting_team === 'A' ? (matchMeta?.team_a_name || 'Team A') : (matchMeta?.team_b_name || 'Team B');
+    if (y > 260) { doc.addPage(); y = 16; }
+    doc.setFontSize(12);
+    doc.setTextColor(0);
+    doc.text(`Innings ${inn.innings.innings_no} — ${teamLabel} (${inn.innings.total_runs}/${inn.innings.total_wickets}, ${parseFloat(inn.innings.overs_completed).toFixed(1)} ov)`, 14, y);
+
+    const battingBody = inn.batting.length ? inn.batting.map(b => {
+      const sr = b.balls_faced > 0 ? ((b.runs / b.balls_faced) * 100).toFixed(1) : '0.0';
+      const nameLabel = `${b.name}${b.is_captain ? ' (C)' : ''}${b.status === 'retired' ? ' (ret)' : b.status === 'out' ? ' (out)' : ''}`;
+      return [nameLabel, b.runs, b.balls_faced, b.fours, b.sixes, sr];
+    }) : [['No data', '', '', '', '', '']];
+    doc.autoTable({
+      startY: y + 3,
+      head: [['Batter', 'R', 'B', '4s', '6s', 'SR']],
+      body: battingBody,
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [30, 144, 255] },
+      margin: { left: 14, right: 14 }
+    });
+
+    const bowlingBody = inn.bowling.length ? inn.bowling.map(b => {
+      const econ = calcEconomy(b.runs_conceded, b.overs_bowled);
+      const nameLabel = `${b.name}${b.is_captain ? ' (C)' : ''}`;
+      return [nameLabel, b.overs_bowled, b.maidens || 0, b.runs_conceded, b.wickets, b.wides || 0, b.no_balls || 0, econ];
+    }) : [['No data', '', '', '', '', '', '', '']];
+    doc.autoTable({
+      startY: doc.lastAutoTable.finalY + 3,
+      head: [['Bowler', 'O', 'M', 'R', 'W', 'Wd', 'Nb', 'Econ']],
+      body: bowlingBody,
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [30, 144, 255] },
+      margin: { left: 14, right: 14 }
+    });
+
+    y = doc.lastAutoTable.finalY + 12;
+  });
+
+  doc.save(`scorecard-${scorecardFilenamePart(matchMeta, matchId)}.pdf`);
 }
 
 
